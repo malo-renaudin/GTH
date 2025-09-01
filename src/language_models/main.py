@@ -39,7 +39,8 @@ from torch.utils.data import Dataset, DataLoader
 import multiprocessing as mp
 from simple_data import TokenDataset, get_batch_iterators
 from torch.cuda.amp import autocast, GradScaler
-
+import mlflow
+import mlflow.pytorch
 
 parser = argparse.ArgumentParser(
     parents=[lm_parser], description="Basic training and evaluation for RNN LM"
@@ -65,6 +66,28 @@ if torch.cuda.is_available():
 # NEW : added device
 device = torch.device("cuda" if args.cuda else "cpu")
 print(f"Using device: {device}")
+
+###############################################################################
+# MLflow setup
+###############################################################################
+
+
+mlflow.set_experiment(args.name)
+mlflow.start_run(run_name=args.name)
+
+mlflow.log_params({
+    "model_class": args.classmodel,
+    "model_type": args.model,
+    "emsize": args.emsize,
+    "nhid": getattr(args, "nhid", None),
+    "nlayers": args.nlayers,
+    "batch_size": args.batch_size,
+    "optimizer": args.optimizer,
+    "lr": 0.001 if args.optimizer == "Adam" else 10,
+    "bptt": args.bptt,
+    "dropout": args.dropout,
+    "cuda": args.cuda
+})
 
 ###############################################################################
 # Load data
@@ -136,24 +159,7 @@ if optimizer_state_dict is not None:
     optimizer.load_state_dict(optimizer_state_dict)
     logging.info("Loaded optimizer state from checkpoint")
 
-###############################################################################
-# Temperature Scheduler
-###############################################################################
-if args.gumbel_softmax:
-    temp_scheduler = TemperatureScheduler(
-        total_steps=args.epochs, min_temp=args.min_temp)
-###############################################################################
-# Regularizations
-###############################################################################
 
-# Sparisity regularization on cell state
-# reg = args.cell_sparsity_lambda
-
-# LT and ST memory neurons in RNN
-# if args.neuron_reg :
-#     lt_indices, st_indices = pick_lt_st_indices
-#     lambda_1 = 0.01
-#     lambda_2 = 0.01
 
 ###############################################################################
 # Evaluation
@@ -162,7 +168,7 @@ if args.gumbel_softmax:
 # Original evaluation function
 
 
-def evaluate(data_source, temperature):
+def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
@@ -216,9 +222,19 @@ def train():
     if args.classmodel == "RNNModel":
         hidden = move_to_device(model.init_hidden(args.batch_size), device)
 
-    # if epoch == 1:
-    #     save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir, 0)
-    #     logging.info(f"Checkpoint saved before the first batch: {epoch}, batch {0}")
+    activation_stats = {}
+    hooks = []
+    def hook_fn(module, input, output):
+        activation_stats[module.__class__.__name__] = {
+            "mean": output.mean().item(),
+            "std": output.std().item(),
+            "max": output.max().item(),
+            "min": output.min().item()
+        }
+        
+    for layer in model.modules():
+        if isinstance(layer, (nn.Linear, nn.Conv1d, nn.LSTM)):
+            hooks.append(layer.register_forward_hook(hook_fn))
 
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i, args.bptt)
@@ -257,18 +273,39 @@ def train():
 
         total_loss += loss.item()
 
-        # Logging
-        temp_str = f"{temperature:8.2f}" if temperature is not None else "   N/A  "
+        # Logging and MLflow
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
-            elapsed = time.time() - start_time
-            logging.info('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.3f} | ms/batch {:5.2f} | '
-                         'loss {:5.2f} | ppl {:8.2f}| temp {}'.format(
-                             epoch, batch, len(train_data) // args.bptt, lr,
-                             elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss), temp_str))
+            grad_norm = max(p.grad.data.norm(2).item() for p in model.parameters() if p.grad is not None)
+            batch_time = time.time() - start_time
+            mem_usage = psutil.Process(os.getpid()).memory_info().rss / (1024 ** 3)
+            gpu_mem = torch.cuda.memory_allocated(device) / (1024 ** 3) if args.cuda else 0
+
+            logging.info('| epoch {:3d} | {:5d}/{:5d} batches | loss {:5.2f} | ppl {:8.2f} | '
+                         'grad_norm {:5.2f} | ms/batch {:5.2f} | cpu_mem {:.2f} GB | gpu_mem {:.2f} GB'.format(
+                epoch, batch, len(train_data)//args.bptt, cur_loss, math.exp(cur_loss),
+                grad_norm, batch_time*1000/args.log_interval, mem_usage, gpu_mem
+            ))
+
+            mlflow.log_metrics({
+                "train_loss": cur_loss,
+                "train_ppl": math.exp(cur_loss),
+                "grad_norm": grad_norm,
+                "batch_time_ms": batch_time*1000/args.log_interval,
+                "cpu_mem_gb": mem_usage,
+                "gpu_mem_gb": gpu_mem
+            }, step=epoch * len(train_data)//args.bptt + batch)
+
+            # Log activation stats
+            for key, stats in activation_stats.items():
+                mlflow.log_metrics({f"activation_{key}_{k}": v for k, v in stats.items()},
+                                   step=epoch * len(train_data)//args.bptt + batch)
+
             total_loss = 0
             start_time = time.time()
             clear_memory()
+    for h in hooks:
+        h.remove()
 
 ###############################################################################
 # Loop over epochs.
@@ -289,36 +326,35 @@ try:
 
         epoch_start_time = time.time()
 
-        temperature = temp_scheduler.get_temperature() if args.gumbel_softmax else None
 
         train()
 
-        val_loss = evaluate(val_data, temperature)
-
-        if args.gumbel_softmax:
-            temp_scheduler.step()
-            logging.info(f"Current temperature: {temperature:.4f}")
+        val_loss = evaluate(val_data)
+        val_ppl = math.exp(val_loss)
 
         logging.info("-" * 89)
-        logging.info(
-            "| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | "
-            "valid ppl {:8.2f}".format(
-                epoch, (time.time() -
-                        epoch_start_time), val_loss, math.exp(val_loss)
-            )
-        )
+        logging.info("| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | valid ppl {:8.2f}".format(
+            epoch, (time.time()-epoch_start_time), val_loss, val_ppl))
         logging.info("-" * 89)
 
-        # Save checkpoint at end of epoch
-        save_checkpoint(model, optimizer, args.name, epoch,
-                        temperature, args.checkpoint_dir)
-        val_loss_data.append(
-            {"epoch": epoch, "batch": "end_of_epoch", "val_loss": val_loss}
-        )
+        # MLflow log
+        mlflow.log_metrics({
+            "val_loss": val_loss,
+            "val_ppl": val_ppl
+        }, step=epoch * len(train_data)//args.bptt)
+
+        # Save checkpoint
+        save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir)
+        val_loss_data.append({"epoch": epoch, "batch": "end_of_epoch", "val_loss": val_loss})
         filename = f"epoch{epoch}"
         save_val_loss_data(val_loss_data, subfolder, filename)
-        model.train()  # Set back to training mode after evaluation
+
+        model.train()
         clear_memory()
+        
 except KeyboardInterrupt:
     logging.info("-" * 89)
     logging.info("Exiting from training early")
+
+mlflow.pytorch.log_model(model, artifact_path="final_model")
+mlflow.end_run()

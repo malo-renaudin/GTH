@@ -1,0 +1,11 @@
+generated_train_sets/
+english_data/
+mlruns/
+train_tokenized.pkl
+test_tokenized.pkl
+valid_tokenized.pkl
+log.txt
+stimuli_generator/questions.txt
+stimuli_generator/test_questions.txt
+stimuli_generator/relative_clauses.txt
+stimuli_generator/test_relative_clauses.txt
