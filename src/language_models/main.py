@@ -41,7 +41,6 @@ from simple_data import TokenDataset, get_batch_iterators
 from torch.cuda.amp import autocast, GradScaler
 
 
-
 parser = argparse.ArgumentParser(
     parents=[lm_parser], description="Basic training and evaluation for RNN LM"
 )
@@ -92,7 +91,6 @@ test_data = batchify(corpus.test, eval_batch_size, device)
 # train_data, val_data, test_data = create_dataloaders(corpus, args.bptt, args.batch_size, eval_batch_size)
 
 
-                                  
 criterion = nn.CrossEntropyLoss()
 
 ###############################################################################
@@ -127,31 +125,32 @@ if hasattr(torch, 'compile'):
 ###############################################################################
 
 if args.optimizer == "SGD":
-    lr=10
+    lr = 10
     optimizer = optim.SGD(model.parameters(), lr=lr)
 elif args.optimizer == "Adam":
-    lr=0.001
+    lr = 0.001
     optimizer = optim.AdamW(model.parameters(), lr=lr)
 else:
     raise ValueError(f"Invalid optimizer: {args.optimizer}")
 if optimizer_state_dict is not None:
     optimizer.load_state_dict(optimizer_state_dict)
     logging.info("Loaded optimizer state from checkpoint")
-    
+
 ###############################################################################
 # Temperature Scheduler
 ###############################################################################
 if args.gumbel_softmax:
-    temp_scheduler = TemperatureScheduler(total_steps= args.epochs, min_temp=args.min_temp)
+    temp_scheduler = TemperatureScheduler(
+        total_steps=args.epochs, min_temp=args.min_temp)
 ###############################################################################
 # Regularizations
 ###############################################################################
 
 # Sparisity regularization on cell state
-reg = args.cell_sparsity_lambda
+# reg = args.cell_sparsity_lambda
 
 # LT and ST memory neurons in RNN
-# if args.neuron_reg : 
+# if args.neuron_reg :
 #     lt_indices, st_indices = pick_lt_st_indices
 #     lambda_1 = 0.01
 #     lambda_2 = 0.01
@@ -161,40 +160,30 @@ reg = args.cell_sparsity_lambda
 ###############################################################################
 
 # Original evaluation function
+
+
 def evaluate(data_source, temperature):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
-    if args.classmodel != "CBR_RNN":
+    if args.classmodel == "RNN_Model":
         hidden = move_to_device(model.init_hidden(eval_batch_size), device)
-        if args.classmodel =='Stack_LSTM':
-            stack = model.init_stack(eval_batch_size)
+
     with torch.no_grad():
         for i in range(0, data_source.size(0) - 1, args.bptt):
             data, targets = get_batch(data_source, i, args.bptt)
             data, targets = data.to(device), targets.to(device)
         # for batch_idx, (data, targets) in enumerate(val_data):
         #     data, targets = data.to(device, non_blocking=True), targets.to(device, non_blocking=True)
-            
-            if args.classmodel == "CBR_RNN":
-                cache = model.init_cache(data, args.nheads)
-                output, hidden = model(data, cache, args.nheads, temperature, args.gumbel_softmax)
-                output_flat = output.reshape(-1, output.size(-1))
-                targets_flat = targets.reshape(-1)
+
+            if args.classmodel == 'TransformerLM':
+                output = model(data)  # No hidden state needed
+                output_flat = output.view(-1, ntokens)
                 total_loss += (
-                    len(data) * nn.CrossEntropyLoss()(output_flat, targets_flat).item()
+                    len(data) * nn.CrossEntropyLoss()(output_flat, targets).item()
                 )
-                del output, output_flat, targets_flat, cache
-                
-            elif args.classmodel == 'Stack_LSTM':
-                    output, hidden, stack = model(data, hidden, stack)
-                    output_flat = output.view(-1, ntokens)
-                    total_loss += (
-                        len(data) * nn.CrossEntropyLoss()(output_flat, targets).item()
-                    )
-                    del output, output_flat
-                    hidden = repackage_hidden(hidden)
-                    stack = stack.detach()
+                del output, output_flat
+
             else:
                 output, hidden = model(data, hidden)
                 output_flat = output.view(-1, ntokens)
@@ -206,6 +195,7 @@ def evaluate(data_source, temperature):
 
     return total_loss / (len(data_source) - 1)
 
+
 # NEW : create folder for checkpointing
 main_folder = "val_loss"
 subfolder = os.path.join(main_folder, args.name)
@@ -216,17 +206,16 @@ val_loss_data = []
 # Training
 ###############################################################################
 
+
 def train():
     # Turn on training mode which enables dropout
     model.train()
     total_loss = 0
     start_time = time.time()
-    #For LSTM model : initialize hidden state at the beggining of each epoch as in colorlessgreenRNNs
+    # For LSTM model : initialize hidden state at the beggining of each epoch as in colorlessgreenRNNs
     if args.classmodel == "RNNModel":
         hidden = move_to_device(model.init_hidden(args.batch_size), device)
-    if args.classmodel=='Stack_LSTM':
-        stack = model.init_stack(args.batch_size)
-    
+
     # if epoch == 1:
     #     save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir, 0)
     #     logging.info(f"Checkpoint saved before the first batch: {epoch}, batch {0}")
@@ -237,114 +226,92 @@ def train():
     # for batch_idx, (data, targets) in enumerate(train_data):
     #     data, targets = data.to(device, non_blocking=True), targets.to(device, non_blocking=True)
         optimizer.zero_grad()
-        
+
         with autocast(enabled=args.cuda):
-                # Forward pass on chunk
-            if args.classmodel == "CBR_RNN":
-                cache = model.init_cache(data, args.nheads)#for CBR_RNN, initialize cache once per batch as in the original code
-                output,_ = model(data, cache, args.nheads, temperature, args.gumbel_softmax)
-                
-                # Reshape outputs and targets
-                output_flat = output.reshape(-1, output.size(-1))
-                targets_flat = targets.reshape(-1)
-                
-                # Calculate loss
-                loss = criterion(output_flat, targets_flat)
-                del output, output_flat, targets_flat
-                
-            elif args.classmodel =='Stack_LSTM': 
-                hidden = repackage_hidden(hidden)
-                stack=stack.detach()
-                output, hidden, stack = model(data, hidden, stack)
-                loss = criterion(output.view(-1, ntokens), targets)
-                del output
-            elif args.classmodel == 'RNNModel' and args.model == 'LSTM':
+            # Forward pass on chunk
+
+            if args.classmodel == 'RNNModel' and args.model == 'LSTM':
                 hidden = repackage_hidden(hidden)
                 output, hidden = model(data, hidden)
                 loss_reg = hidden[1].abs().mean()
-                loss = criterion(output.view(-1, ntokens), targets) #+reg*loss_reg
-            # elif args.classmodel == 'RNNModel' and args.model == 'RNN':
-            #     hidden = repackage_hidden(hidden)
-            #     output,hidden = model(data,hidden)
-            #     if args.neuron_reg:
-            #         output
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        scaler.step(optimizer)
-        scaler.update()
-                
-                # del output
+                loss = criterion(output.view(-1, ntokens),
+                                 targets)  # +reg*loss_reg
+            # Around line where you have the other model conditions
+            elif args.classmodel == 'TransformerLM':
+                output = model(data)  # No hidden state needed
+                loss = criterion(output.view(-1, ntokens), targets)
+                del output
 
-       
-        # loss.backward()
+        if args.cuda and scaler is not None:
+            # Mixed precision training
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            # Regular training
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            optimizer.step()
 
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-
-        # optimizer.step()   
-        # # if args.temp_scheduler or args.gumbel_softmax :
-        # #     temp_scheduler.step() 
-        # # elif args.gumbel_softmax:
-        # #     tau_scheduler.step()
         total_loss += loss.item()
 
-        # if epoch == 1 and batch <= 300 :  
-        #     save_checkpoint(model, optimizer, args.name, epoch, batch)
-        # if epoch == 1 and batch > 300 and  batch % 100 == 0 :
-        #     save_checkpoint(model, optimizer, args.name, epoch, batch)
-            
         # Logging
         temp_str = f"{temperature:8.2f}" if temperature is not None else "   N/A  "
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
             logging.info('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.3f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f} | ppl {:8.2f}| temp {}'.format(
-                epoch, batch, len(train_data) // args.bptt, lr,
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss), temp_str))
+                         'loss {:5.2f} | ppl {:8.2f}| temp {}'.format(
+                             epoch, batch, len(train_data) // args.bptt, lr,
+                             elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss), temp_str))
             total_loss = 0
             start_time = time.time()
             clear_memory()
-    
+
 ###############################################################################
 # Loop over epochs.
 ###############################################################################
+
 
 try:
     if args.epoch_checkpointed:
         k = int(args.epoch_checkpointed)
     else:
         k = 1
-        
+
     for epoch in range(k, args.epochs + 1):
         # Shuffle and tokenize the training data
-        corpus.train = tokenize(corpus.dictionary, os.path.join(args.data, 'train.txt'), shuffle=True)
+        corpus.train = tokenize(corpus.dictionary, os.path.join(
+            args.data, 'train.txt'), shuffle=True)
         train_data = batchify(corpus.train, args.batch_size, device)
-        
+
         epoch_start_time = time.time()
-        
+
         temperature = temp_scheduler.get_temperature() if args.gumbel_softmax else None
-            
-        
+
         train()
 
         val_loss = evaluate(val_data, temperature)
-        
-        if args.gumbel_softmax :
-            temp_scheduler.step() 
+
+        if args.gumbel_softmax:
+            temp_scheduler.step()
             logging.info(f"Current temperature: {temperature:.4f}")
-            
+
         logging.info("-" * 89)
         logging.info(
             "| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | "
             "valid ppl {:8.2f}".format(
-                epoch, (time.time() - epoch_start_time), val_loss, math.exp(val_loss)
+                epoch, (time.time() -
+                        epoch_start_time), val_loss, math.exp(val_loss)
             )
         )
         logging.info("-" * 89)
 
         # Save checkpoint at end of epoch
-        save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir)
+        save_checkpoint(model, optimizer, args.name, epoch,
+                        temperature, args.checkpoint_dir)
         val_loss_data.append(
             {"epoch": epoch, "batch": "end_of_epoch", "val_loss": val_loss}
         )
@@ -355,24 +322,3 @@ try:
 except KeyboardInterrupt:
     logging.info("-" * 89)
     logging.info("Exiting from training early")
-
-# val_loss_df = pd.DataFrame(val_loss_data)
-# val_loss_df.to_csv('val_loss.csv', index=False)
-
-# Load the best saved model.
-# load_start_time = time.time()
-# with open(args.save, "rb") as f:
-#     model = torch.load(f)
-# logging.info(f"Time to load best model: {time.time() - load_start_time:.2f}s")
-
-# # Run on test data
-# test_start_time = time.time()
-# test_loss = evaluate(test_data)
-# logging.info("=" * 89)
-# logging.info(
-#     "| End of training | test loss {:5.2f} | test ppl {:8.2f}".format(
-#         test_loss, math.exp(test_loss)
-#     )
-# )
-# logging.info(f"Time to evaluate on test data: {time.time() - test_start_time:.2f}s")
-# logging.info("=" * 89)
