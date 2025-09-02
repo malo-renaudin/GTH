@@ -138,7 +138,7 @@ def generate_sentence():
 # --------------------------
 # Generate dataset
 # --------------------------
-def generate_dataset(num_sentences=100, output_file="ORC.txt"):
+def generate_dataset(num_sentences=1000000, output_file="ORC.txt"):
     sentences = set()
     while len(sentences) < num_sentences:
         s = generate_sentence()
@@ -153,4 +153,4 @@ def generate_dataset(num_sentences=100, output_file="ORC.txt"):
 # Main
 # --------------------------
 if __name__ == "__main__":
-    generate_dataset(num_sentences=100)
+    generate_dataset(num_sentences=1000000)
