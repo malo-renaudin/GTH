@@ -13,7 +13,7 @@
 #SBATCH --mail-user=malorenaudin1@gmail.com
 #SBATCH --qos=qos_gpu_h100-dev
 
-cd $WORK/GTH
+cd $WORK/GTH/english-stimuli-generator
 
 
 
