@@ -23,6 +23,8 @@ module load cuda/12.2.0 nccl/2.19.3-1-cuda cudnn/8.9.5.30-cuda gcc/10.1.0 openmp
 module load sox/14.4.2 sparsehash/2.0.3 libjpeg-turbo/2.1.3
 module load pytorch-gpu/py3/2.2.0
 
+source .venv/bin/activate
+
 export TORCHDYNAMO_DISABLE=1
 export TORCH_COMPILE_DISABLE=1
 
