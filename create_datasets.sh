@@ -2,6 +2,7 @@
 #SBATCH --job-name=create_datasets        # Job name
 #SBATCH --partition=gpu 
 #SBATCH --export=ALL 
+#SBATCH --gres=gpu:1                # Request 1 GPU
 #SBATCH --cpus-per-task=6           # Number of CPU cores per task
 #SBATCH --mem=32G                   # Memory per task
 #SBATCH --time=2:00:00              # Adjust time as needed
