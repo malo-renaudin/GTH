@@ -1,34 +1,32 @@
 #!/bin/bash
-#SBATCH --job-name=lm_train         # Job name
-#SBATCH --partition=gpu 
-#SBATCH --export=ALL 
-#SBATCH --cpus-per-task=6           # Number of CPU cores per task
-#SBATCH --gres=gpu:1                # Request 1 GPU
-#SBATCH --mem=32G                   # Memory per task
-#SBATCH --time=2:00:00              # Adjust time as needed
-#SBATCH --output=log/%x-%A_%a.log   # Log file per array task
-#SBATCH --array=0-18                 # Number of tasks - adjust based on your dataset/model combinations
+#SBATCH --job-name=lm_train         #
+#SBATCH --array=0-18
+#SBATCH --output=job_outputs/job_%A_%a.out
+#SBATCH --error=job_outputs/job_%A_%a.err
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
+#SBATCH --time=20:00:00
+#SBATCH --constraint=h100
+#SBATCH --account=ywa@h100
+#SBATCH --hint=nomultithread
+#SBATCH --partition=gpu_p6
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=malorenaudin1@gmail.com
+#SBATCH --qos=qos_gpu_h100-t3
+#SBATCH --signal=SIGUSR1@90
 
-# Load modules
-module load miniconda3/24.3.0
-module load python/3.9.18-lpwk
-module load cuda/11.8.0-r465
-source ~/.bashrc
-conda activate leaps3
-
-echo "Running job on $(hostname)"
-which python
-echo "Python version: $(python --version)"
-echo "CUDA_DEVICE: $CUDA_VISIBLE_DEVICES"
+# Create output directory
+mkdir -p job_outputs
 
 # Define datasets and model configs
 DATASETS=(
-    "/scratch2/mrenaudin/colorlessgreenRNNs/english_data"
-    "/scratch2/mrenaudin/GTH/generated_train_sets/rc_0_08_q_0_50"
-    "/scratch2/mrenaudin/GTH/generated_train_sets/rc_0_08_q_1_00"
-    "/scratch2/mrenaudin/GTH/generated_train_sets/rc_0_16_q_0_50"
-    "/scratch2/mrenaudin/GTH/generated_train_sets/rc_0_16_q_1_00"
-    "/scratch2/mrenaudin/GTH/generated_train_sets/rc_0_32_q_2_00"
+    "english_data"
+    "generated_train_sets/rc_0_08_q_0_50"
+    "generated_train_sets/rc_0_08_q_1_00"
+    "generated_train_sets/rc_0_16_q_0_50"
+    "generated_train_sets/rc_0_16_q_1_00"
+    "generated_train_sets/rc_0_32_q_2_00"
 )
 
 MODELS=(
