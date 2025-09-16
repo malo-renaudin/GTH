@@ -343,7 +343,8 @@ try:
         # }, step=epoch * len(train_data)//args.bptt)
 
         # Save checkpoint
-        # save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir)
+        if epoch==args.epochs : 
+            save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir)
         val_loss_data.append({"epoch": epoch, "batch": "end_of_epoch", "val_loss": val_loss})
         filename = f"epoch{epoch}"
         save_val_loss_data(val_loss_data, subfolder, filename)

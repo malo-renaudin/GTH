@@ -89,93 +89,184 @@ class RNNModel(nn.Module):
             return weight.new(self.nlayers, bsz, self.nhid).zero_()
 
 
-class TransformerLM(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6, dropout=0.1, tied=True):
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, n_heads, dropout=0.1):
         super().__init__()
-
-        # Input checks
-        assert d_model % nhead == 0, f"d_model ({d_model}) must be divisible by nhead ({nhead})"
-        assert vocab_size > 0, "vocab_size must be positive"
-
+        assert d_model % n_heads == 0
+        
         self.d_model = d_model
-        self.vocab_size = vocab_size
-        self.tied = tied
-
-        # Embedding layer
-        self.embedding = nn.Embedding(vocab_size, d_model)
-
-        # Positional encoding (register as buffer to move with model)
-        self.register_buffer(
-            'pos_encoding', self._get_pos_encoding(5000, d_model))
-
-        # Transformer decoder layers
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=4*d_model,
-            dropout=dropout,
-            batch_first=False  # Training script expects (seq, batch, features)
-        )
-        self.transformer = nn.TransformerDecoder(decoder_layer, num_layers)
-
-        # Output layer
-        self.decoder = nn.Linear(d_model, vocab_size)
-
-        # Weight tying (if requested)
-        if tied:
-            self.decoder.weight = self.embedding.weight
-
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+        
+        self.w_q = nn.Linear(d_model, d_model)
+        self.w_k = nn.Linear(d_model, d_model)
+        self.w_v = nn.Linear(d_model, d_model)
+        self.w_o = nn.Linear(d_model, d_model)
+        
         self.dropout = nn.Dropout(dropout)
-        self._init_weights()
+        
+    def forward(self, x, mask=None):
+        batch_size, seq_len, d_model = x.shape
+        
+        # Linear projections
+        Q = self.w_q(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
+        K = self.w_k(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
+        V = self.w_v(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
+        
+        # Attention
+        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        
+        if mask is not None:
+            attention_scores = attention_scores.masked_fill(mask == 0, -1e9)
+        
+        attention_weights = F.softmax(attention_scores, dim=-1)
+        attention_weights = self.dropout(attention_weights)
+        
+        # Apply attention to values
+        output = torch.matmul(attention_weights, V)
+        
+        # Concatenate heads
+        output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+        
+        return self.w_o(output)
 
-    def _get_pos_encoding(self, max_len, d_model):
+
+class FeedForward(nn.Module):
+    def __init__(self, d_model, d_ff, dropout=0.1):
+        super().__init__()
+        self.linear1 = nn.Linear(d_model, d_ff)
+        self.linear2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+        return self.linear2(self.dropout(F.relu(self.linear1(x))))
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, n_heads, d_ff, dropout=0.1):
+        super().__init__()
+        self.attention = MultiHeadAttention(d_model, n_heads, dropout)
+        self.feed_forward = FeedForward(d_model, d_ff, dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x, mask=None):
+        # Self-attention with residual connection
+        attn_output = self.attention(x, mask)
+        x = self.norm1(x + self.dropout(attn_output))
+        
+        # Feed-forward with residual connection
+        ff_output = self.feed_forward(x)
+        x = self.norm2(x + self.dropout(ff_output))
+        
+        return x
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len).unsqueeze(1).float()
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() *
-                             -(math.log(10000.0) / d_model))
+        
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
+                           -(math.log(10000.0) / d_model))
+        
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        return pe
+        
+        self.register_buffer('pe', pe.unsqueeze(0))
+        
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
 
-    def _init_weights(self):
-        initrange = 0.1
-        self.embedding.weight.data.uniform_(-initrange, initrange)
-        if not self.tied:
-            self.decoder.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.zero_()
 
-    def _causal_mask(self, size, device):
-        """Generate causal mask compatible with training script format"""
-        return torch.triu(torch.ones(size, size, device=device) * float('-inf'), diagonal=1)
-
-    def forward(self, input_seq):
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size, d_model=512, n_heads=8, n_layers=6, 
+                 d_ff=2048, max_len=5000, dropout=0.1, tie_weights=True):
+        super().__init__()
+        
+        self.d_model = d_model
+        self.vocab_size = vocab_size
+        
+        # Token embedding
+        self.token_embedding = nn.Embedding(vocab_size, d_model)
+        
+        # Positional encoding
+        self.pos_encoding = PositionalEncoding(d_model, max_len)
+        
+        # Transformer blocks
+        self.transformer_blocks = nn.ModuleList([
+            TransformerBlock(d_model, n_heads, d_ff, dropout)
+            for _ in range(n_layers)
+        ])
+        
+        # Output layer
+        self.ln_f = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+        
+        # Weight tying
+        if tie_weights:
+            self.lm_head.weight = self.token_embedding.weight
+        
+        self.dropout = nn.Dropout(dropout)
+        
+        # Initialize weights
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            torch.nn.init.zeros_(module.bias)
+            torch.nn.init.ones_(module.weight)
+    
+    def create_causal_mask(self, seq_len, device):
+        """Create causal mask to prevent attention to future tokens"""
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=device))
+        return mask.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, seq_len, seq_len)
+    
+    def forward(self, input_ids, targets=None):
         """
-        Forward pass for TransformerLM
-
         Args:
-            input_seq: (seq_len, batch_size) - token indices
-
+            input_ids: (batch_size, seq_len) - token indices
+            targets: (batch_size, seq_len) - target tokens for loss calculation
+        
         Returns:
-            output: (seq_len, batch_size, vocab_size) - logits
+            if targets is None: logits (batch_size, seq_len, vocab_size)
+            if targets provided: (loss, logits)
         """
-        seq_len, batch_size = input_seq.shape
-
-        # Input validation
-        assert seq_len <= self.pos_encoding.size(
-            0), f"Sequence too long: {seq_len} > {self.pos_encoding.size(0)}"
-
-        # Embeddings + positional encoding
-        embedded = self.embedding(input_seq) * math.sqrt(self.d_model)
-        embedded = embedded + self.pos_encoding[:seq_len].unsqueeze(1)
-        embedded = self.dropout(embedded)
-
+        batch_size, seq_len = input_ids.shape
+        
+        # Token embeddings
+        token_emb = self.token_embedding(input_ids)  # (batch_size, seq_len, d_model)
+        token_emb = token_emb * math.sqrt(self.d_model)  # Scale embeddings
+        
+        # Add positional encoding
+        x = self.pos_encoding(token_emb)
+        x = self.dropout(x)
+        
         # Create causal mask
-        causal_mask = self._causal_mask(seq_len, input_seq.device)
-
-        # Transformer forward pass
-        output = self.transformer(embedded, embedded, tgt_mask=causal_mask)
-
-        # Project to vocabulary
-        output = self.decoder(output)
-
-        return output
+        causal_mask = self.create_causal_mask(seq_len, input_ids.device)
+        
+        # Pass through transformer blocks
+        for block in self.transformer_blocks:
+            x = block(x, causal_mask)
+        
+        # Final layer norm
+        x = self.ln_f(x)
+        
+        # Language modeling head
+        logits = self.lm_head(x)  # (batch_size, seq_len, vocab_size)
+        
+        
+        return logits
+    
+    
