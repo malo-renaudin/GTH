@@ -31,7 +31,7 @@ class Dictionary(object):
             self.vocab_file_exists = True
         except FileNotFoundError:
             logging.info("Vocab file not found, creating new vocab file.")
-            self.create_vocab(os.path.join(path, "nounpp.txt"))
+            self.create_vocab(os.path.join(path, "vocab.txt"))
             open(vocab_path, "w").write("\n".join([w for w in self.idx2word]))
 
     def add_word(self, word):
