@@ -74,7 +74,7 @@ else
         --emsize 650 \
         --nheads 10 \
         --d_model 650 \
-        --d_ff 2600 \
+        --d_ff 1300 \
         --nlayers 2 \
         --optimizer 'Adam' \
         --epochs 40 \

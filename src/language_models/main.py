@@ -37,10 +37,9 @@ import torch.optim as optim
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import multiprocessing as mp
-from simple_data import TokenDataset, get_batch_iterators
+
 from torch.cuda.amp import autocast, GradScaler
-import mlflow
-import mlflow.pytorch
+
 
 parser = argparse.ArgumentParser(
     parents=[lm_parser], description="Basic training and evaluation for RNN LM"
@@ -72,22 +71,22 @@ print(f"Using device: {device}")
 ###############################################################################
 
 
-mlflow.set_experiment(args.name)
-mlflow.start_run(run_name=args.name)
+# mlflow.set_experiment(args.name)
+# mlflow.start_run(run_name=args.name)
 
-mlflow.log_params({
-    "model_class": args.classmodel,
-    "model_type": args.model,
-    "emsize": args.emsize,
-    "nhid": getattr(args, "nhid", None),
-    "nlayers": args.nlayers,
-    "batch_size": args.batch_size,
-    "optimizer": args.optimizer,
-    "lr": 0.001 if args.optimizer == "Adam" else 10,
-    "bptt": args.bptt,
-    "dropout": args.dropout,
-    "cuda": args.cuda
-})
+# mlflow.log_params({
+#     "model_class": args.classmodel,
+#     "model_type": args.model,
+#     "emsize": args.emsize,
+#     "nhid": getattr(args, "nhid", None),
+#     "nlayers": args.nlayers,
+#     "batch_size": args.batch_size,
+#     "optimizer": args.optimizer,
+#     "lr": 0.001 if args.optimizer == "Adam" else 10,
+#     "bptt": args.bptt,
+#     "dropout": args.dropout,
+#     "cuda": args.cuda
+# })
 
 ###############################################################################
 # Load data
@@ -287,19 +286,19 @@ def train():
                 grad_norm, batch_time*1000/args.log_interval, mem_usage, gpu_mem
             ))
 
-            mlflow.log_metrics({
-                "train_loss": cur_loss,
-                "train_ppl": math.exp(cur_loss),
-                "grad_norm": grad_norm,
-                "batch_time_ms": batch_time*1000/args.log_interval,
-                "cpu_mem_gb": mem_usage,
-                "gpu_mem_gb": gpu_mem
-            }, step=epoch * len(train_data)//args.bptt + batch)
+            # mlflow.log_metrics({
+            #     "train_loss": cur_loss,
+            #     "train_ppl": math.exp(cur_loss),
+            #     "grad_norm": grad_norm,
+            #     "batch_time_ms": batch_time*1000/args.log_interval,
+            #     "cpu_mem_gb": mem_usage,
+            #     "gpu_mem_gb": gpu_mem
+            # }, step=epoch * len(train_data)//args.bptt + batch)
 
-            # Log activation stats
-            for key, stats in activation_stats.items():
-                mlflow.log_metrics({f"activation_{key}_{k}": v for k, v in stats.items()},
-                                   step=epoch * len(train_data)//args.bptt + batch)
+            # # Log activation stats
+            # for key, stats in activation_stats.items():
+            #     mlflow.log_metrics({f"activation_{key}_{k}": v for k, v in stats.items()},
+            #                        step=epoch * len(train_data)//args.bptt + batch)
 
             total_loss = 0
             start_time = time.time()
@@ -337,14 +336,14 @@ try:
             epoch, (time.time()-epoch_start_time), val_loss, val_ppl))
         logging.info("-" * 89)
 
-        # MLflow log
-        mlflow.log_metrics({
-            "val_loss": val_loss,
-            "val_ppl": val_ppl
-        }, step=epoch * len(train_data)//args.bptt)
+        # # MLflow log
+        # mlflow.log_metrics({
+        #     "val_loss": val_loss,
+        #     "val_ppl": val_ppl
+        # }, step=epoch * len(train_data)//args.bptt)
 
         # Save checkpoint
-        save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir)
+        # save_checkpoint(model, optimizer, args.name, epoch, temperature, args.checkpoint_dir)
         val_loss_data.append({"epoch": epoch, "batch": "end_of_epoch", "val_loss": val_loss})
         filename = f"epoch{epoch}"
         save_val_loss_data(val_loss_data, subfolder, filename)
@@ -356,5 +355,5 @@ except KeyboardInterrupt:
     logging.info("-" * 89)
     logging.info("Exiting from training early")
 
-mlflow.pytorch.log_model(model, artifact_path="final_model")
-mlflow.end_run()
+# mlflow.pytorch.log_model(model, artifact_path="final_model")
+# mlflow.end_run()
