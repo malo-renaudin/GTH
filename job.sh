@@ -64,6 +64,7 @@ if [ "$MODEL" == "RNNModel" ]; then
         --nlayers 2 \
         --optimizer 'Adam' \
         --epochs 40 \
+        --lr 0.001 \
         --cuda
 else
     python src/language_models/main.py \
@@ -72,11 +73,12 @@ else
         --classmodel $MODEL \
         --batch_size 512 \
         --emsize 650 \
-        --nheads 10 \
+        --nheads 8 \
         --d_model 650 \
         --d_ff 1300 \
         --nlayers 2 \
         --optimizer 'Adam' \
         --epochs 40 \
+        --lr 0.001 \
         --cuda
 fi
