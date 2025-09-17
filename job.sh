@@ -73,7 +73,7 @@ else
         --classmodel $MODEL \
         --batch_size 512 \
         --emsize 650 \
-        --nheads 8 \
+        --nheads 10 \
         --d_model 650 \
         --d_ff 1300 \
         --nlayers 2 \
