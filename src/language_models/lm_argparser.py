@@ -24,6 +24,16 @@ lm_parser.add_argument(
 lm_parser.add_argument(
     "--emsize", type=int, default=128, help="size of word embeddings"
 )
+
+lm_parser.add_argument(
+    "--d_model", type=int
+)
+
+lm_parser.add_argument(
+    "--d_ff", type=int
+)
+
+
 lm_parser.add_argument(
     "--nhid", type=int, default=128, help="number of hidden units per layer"
 )
