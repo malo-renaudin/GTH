@@ -98,6 +98,7 @@ criterion = nn.CrossEntropyLoss()
 
 logging.info("Building the model")
 print(args.model)
+
 model, optimizer_state_dict = load_model(
     args.classmodel,
     args.model,
@@ -110,9 +111,6 @@ model, optimizer_state_dict = load_model(
     args.nlayers,
     args.tied,
     args.checkpoint_path,
-    args.memory_size,
-    args.memory_dim,
-    args.bptt
 )
 
 logging.info(f"Built {args.classmodel}")

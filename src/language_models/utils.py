@@ -203,12 +203,9 @@ def load_model(
     nlayers,
     tied,
     checkpoint_path,
-    d_model,
-    n_heads, 
-    n_layers,
-    tie_weights,
-    d_ff,
-    **kwargs  # Catch any extra parameters
+    d_model=None,      # Add these parameters
+    d_ff=None,
+    **kwargs
 ):
     import model as m
     import torch
@@ -216,17 +213,19 @@ def load_model(
     if classmodel == "RNNModel":
         model = m.RNNModel(model, ntokens, emsize, nhid, nlayers, dropout, tied)
     elif classmodel == 'TransformerLM':
+        model_dim = d_model if d_model is not None else emsize
+        feed_forward_dim = d_ff if d_ff is not None else model_dim * 4
+        
         model = m.TransformerLM(
             vocab_size=ntokens,
-            d_model=emsize,
-            n_heads=nheads,        # Fixed: your model expects n_heads
-            n_layers=nlayers,      # Fixed: your model expects n_layers  
+            d_model=model_dim,        # Use the d_model parameter
+            n_heads=nheads,
+            n_layers=nlayers,
+            d_ff=feed_forward_dim,    # Use the d_ff parameter
             dropout=dropout,
             tie_weights=tied,
-            d_ff=emsize * 4,       # Default: 4x d_model
-            max_len=35,          # Default max length
+            max_len=35,
         )
-    
     optimizer_state_dict = None
     if checkpoint_path:
         with open(checkpoint_path, "rb") as f:
