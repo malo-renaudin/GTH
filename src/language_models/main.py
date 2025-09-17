@@ -156,6 +156,7 @@ def evaluate(data_source):
         #     data, targets = data.to(device, non_blocking=True), targets.to(device, non_blocking=True)
 
             if args.classmodel == 'TransformerLM':
+                data = data.transpose(0, 1)
                 output = model(data)  # No hidden state needed
                 output_flat = output.view(-1, ntokens)
                 total_loss += (
@@ -212,6 +213,7 @@ def train():
                                 targets)  # +reg*loss_reg
         # Around line where you have the other model conditions
         elif args.classmodel == 'TransformerLM':
+            data = data.transpose(0, 1)
             output = model(data)  # No hidden state needed
             loss = criterion(output.view(-1, ntokens), targets)
             del output
