@@ -115,8 +115,7 @@ model, optimizer_state_dict = load_model(
 
 logging.info(f"Built {args.classmodel}")
 
-if hasattr(torch, 'compile'):
-    model = torch.compile(model)
+
 ###############################################################################
 # Optimizer
 ###############################################################################
