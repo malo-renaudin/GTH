@@ -1,6 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=lm_train         #
-#SBATCH --array=0-18
+#SBATCH --job-name=test_transformer        
 #SBATCH --output=job_outputs/job_%A_%a.out
 #SBATCH --error=job_outputs/job_%A_%a.err
 #SBATCH --ntasks=1
