@@ -38,7 +38,6 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import multiprocessing as mp
 
-from torch.cuda.amp import autocast, GradScaler
 
 
 parser = argparse.ArgumentParser(
@@ -53,7 +52,6 @@ logging.basicConfig(
 )
 logging.info(args)
 
-scaler = GradScaler() if args.cuda else None
 
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -66,27 +64,6 @@ if torch.cuda.is_available():
 device = torch.device("cuda" if args.cuda else "cpu")
 print(f"Using device: {device}")
 
-###############################################################################
-# MLflow setup
-###############################################################################
-
-
-# mlflow.set_experiment(args.name)
-# mlflow.start_run(run_name=args.name)
-
-# mlflow.log_params({
-#     "model_class": args.classmodel,
-#     "model_type": args.model,
-#     "emsize": args.emsize,
-#     "nhid": getattr(args, "nhid", None),
-#     "nlayers": args.nlayers,
-#     "batch_size": args.batch_size,
-#     "optimizer": args.optimizer,
-#     "lr": 0.001 if args.optimizer == "Adam" else 10,
-#     "bptt": args.bptt,
-#     "dropout": args.dropout,
-#     "cuda": args.cuda
-# })
 
 ###############################################################################
 # Load data
@@ -221,58 +198,35 @@ def train():
     if args.classmodel == "RNNModel":
         hidden = move_to_device(model.init_hidden(args.batch_size), device)
 
-    activation_stats = {}
-    hooks = []
-    def hook_fn(module, input, output):
-        activation_stats[module.__class__.__name__] = {
-            "mean": output.mean().item(),
-            "std": output.std().item(),
-            "max": output.max().item(),
-            "min": output.min().item()
-        }
-        
-    for layer in model.modules():
-        if isinstance(layer, (nn.Linear, nn.Conv1d, nn.LSTM)):
-            hooks.append(layer.register_forward_hook(hook_fn))
-
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i, args.bptt)
         data, targets = data.to(device), targets.to(device)
-    # for batch_idx, (data, targets) in enumerate(train_data):
-    #     data, targets = data.to(device, non_blocking=True), targets.to(device, non_blocking=True)
+    
         optimizer.zero_grad()
 
-        with autocast(enabled=args.cuda):
+    
             # Forward pass on chunk
 
-            if args.classmodel == 'RNNModel' and args.model == 'LSTM':
-                hidden = repackage_hidden(hidden)
-                output, hidden = model(data, hidden)
-                loss_reg = hidden[1].abs().mean()
-                loss = criterion(output.view(-1, ntokens),
-                                 targets)  # +reg*loss_reg
-            # Around line where you have the other model conditions
-            elif args.classmodel == 'TransformerLM':
-                output = model(data)  # No hidden state needed
-                loss = criterion(output.view(-1, ntokens), targets)
-                del output
+        if args.classmodel == 'RNNModel' and args.model == 'LSTM':
+            hidden = repackage_hidden(hidden)
+            output, hidden = model(data, hidden)
+            loss_reg = hidden[1].abs().mean()
+            loss = criterion(output.view(-1, ntokens),
+                                targets)  # +reg*loss_reg
+        # Around line where you have the other model conditions
+        elif args.classmodel == 'TransformerLM':
+            output = model(data)  # No hidden state needed
+            loss = criterion(output.view(-1, ntokens), targets)
+            del output
+        
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+        optimizer.step()
 
-        if args.cuda and scaler is not None:
-            # Mixed precision training
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            # Regular training
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-            optimizer.step()
 
         total_loss += loss.item()
 
-        # Logging and MLflow
+        # Logging 
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
             grad_norm = max(p.grad.data.norm(2).item() for p in model.parameters() if p.grad is not None)
@@ -286,25 +240,18 @@ def train():
                 grad_norm, batch_time*1000/args.log_interval, mem_usage, gpu_mem
             ))
 
-            # mlflow.log_metrics({
-            #     "train_loss": cur_loss,
-            #     "train_ppl": math.exp(cur_loss),
-            #     "grad_norm": grad_norm,
-            #     "batch_time_ms": batch_time*1000/args.log_interval,
-            #     "cpu_mem_gb": mem_usage,
-            #     "gpu_mem_gb": gpu_mem
-            # }, step=epoch * len(train_data)//args.bptt + batch)
-
-            # # Log activation stats
-            # for key, stats in activation_stats.items():
-            #     mlflow.log_metrics({f"activation_{key}_{k}": v for k, v in stats.items()},
-            #                        step=epoch * len(train_data)//args.bptt + batch)
-
+            if epoch==0 :
+                if batch < 300 : 
+                    save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
+                if batch > 300 and batch < 1000 and batch%100==0:
+                    save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
+                if batch > 1000 and batch%500==0:
+                    save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
+                    
             total_loss = 0
             start_time = time.time()
             clear_memory()
-    for h in hooks:
-        h.remove()
+
 
 ###############################################################################
 # Loop over epochs.
@@ -336,15 +283,8 @@ try:
             epoch, (time.time()-epoch_start_time), val_loss, val_ppl))
         logging.info("-" * 89)
 
-        # # MLflow log
-        # mlflow.log_metrics({
-        #     "val_loss": val_loss,
-        #     "val_ppl": val_ppl
-        # }, step=epoch * len(train_data)//args.bptt)
-
         # Save checkpoint
-        if epoch==args.epochs : 
-            save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir)
+        save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir)
         val_loss_data.append({"epoch": epoch, "batch": "end_of_epoch", "val_loss": val_loss})
         filename = f"epoch{epoch}"
         save_val_loss_data(val_loss_data, subfolder, filename)

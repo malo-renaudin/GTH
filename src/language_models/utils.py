@@ -203,27 +203,30 @@ def load_model(
     nlayers,
     tied,
     checkpoint_path,
-    memory_size,
-    memory_dim,
-    bptt
+    d_model,
+    n_heads, 
+    n_layers,
+    tie_weights,
+    d_ff,
+    **kwargs  # Catch any extra parameters
 ):
     import model as m
-    import torch.nn as nn
-
+    import torch
+    
     if classmodel == "RNNModel":
-        model = m.RNNModel(model, ntokens, emsize,
-                           nhid, nlayers, dropout, tied)
-
+        model = m.RNNModel(model, ntokens, emsize, nhid, nlayers, dropout, tied)
     elif classmodel == 'TransformerLM':
         model = m.TransformerLM(
             vocab_size=ntokens,
             d_model=emsize,
-            nhead=nheads,
-            num_layers=nlayers,
+            n_heads=nheads,        # Fixed: your model expects n_heads
+            n_layers=nlayers,      # Fixed: your model expects n_layers  
             dropout=dropout,
-            tied=tied
+            tie_weights=tied,
+            d_ff=emsize * 4,       # Default: 4x d_model
+            max_len=35,          # Default max length
         )
-
+    
     optimizer_state_dict = None
     if checkpoint_path:
         with open(checkpoint_path, "rb") as f:
@@ -232,10 +235,9 @@ def load_model(
             )
             model.load_state_dict(state_dict["model_state_dict"])
             optimizer_state_dict = state_dict["optimizer_state_dict"]
-            temperature = state_dict['temperature']
-
+    
     model = model.to(device)
-    return model, optimizer_state_dict  # , temperature
+    return model, optimizer_state_dict
 
 
 def get_memory_usage():
