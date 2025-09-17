@@ -145,7 +145,7 @@ def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
-    if args.classmodel == "RNN_Model":
+    if args.classmodel == "RNNModel":
         hidden = move_to_device(model.init_hidden(eval_batch_size), device)
 
     with torch.no_grad():
