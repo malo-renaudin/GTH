@@ -80,5 +80,6 @@ else
         --optimizer 'Adam' \
         --epochs 40 \
         --lr 0.001 \
+        --bptt 128 \
         --cuda
 fi
