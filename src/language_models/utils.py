@@ -224,7 +224,7 @@ def load_model(
             d_ff=feed_forward_dim,    # Use the d_ff parameter
             dropout=dropout,
             tie_weights=tied,
-            max_len=35,
+            max_len=128,
         )
     optimizer_state_dict = None
     if checkpoint_path:
