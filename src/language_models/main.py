@@ -160,7 +160,7 @@ def evaluate(data_source):
                 output = model(data)  # No hidden state needed
                 output_flat = output.view(-1, ntokens)
                 total_loss += (
-                    len(data) * nn.CrossEntropyLoss()(output_flat, targets).item()
+                    nn.CrossEntropyLoss()(output_flat, targets).item()
                 )
                 del output, output_flat
 
@@ -168,7 +168,7 @@ def evaluate(data_source):
                 output, hidden = model(data, hidden)
                 output_flat = output.view(-1, ntokens)
                 total_loss += (
-                    len(data) * nn.CrossEntropyLoss()(output_flat, targets).item()
+                    nn.CrossEntropyLoss()(output_flat, targets).item()
                 )
                 del output, output_flat
                 hidden = repackage_hidden(hidden)
@@ -239,7 +239,7 @@ def train():
                 grad_norm, batch_time*1000/args.log_interval, mem_usage, gpu_mem
             ))
 
-            if epoch==0 :
+            if epoch==1 :
                 if batch < 300 : 
                     save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
                 if batch > 300 and batch < 1000 and batch%100==0:
