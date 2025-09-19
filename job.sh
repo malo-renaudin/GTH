@@ -22,11 +22,11 @@ mkdir -p job_outputs
 # Define datasets and model configs
 DATASETS=(
     "english_data"
-    "generated_train_sets/rc_0_08_q_0_50"
-    "generated_train_sets/rc_0_08_q_1_00"
-    "generated_train_sets/rc_0_16_q_0_50"
-    "generated_train_sets/rc_0_16_q_1_00"
-    "generated_train_sets/rc_0_32_q_2_00"
+    "modulated_sets/rc_0008_q_0050"
+    "modulated_sets/rc_0008_q_0100"
+    "modulated_sets/rc_0016_q_0050"
+    "modulated_sets/rc_0016_q_0100"
+    "modulated_sets/rc_0032_q_0200"
 )
 
 MODELS=(
