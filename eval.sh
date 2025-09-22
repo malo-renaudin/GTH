@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=checkpoint_eval
 #SBATCH --array=0-19  
-#SBATCH --time=24:00:00
+#SBATCH --time=2:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/eval_%A_%a.out
 #SBATCH --error=logs/eval_%A_%a.err
