@@ -47,24 +47,8 @@ declare -A DATA_PATHS=(
 
 # Load modules for Jean Zay
 module purge
+module load anaconda-py3/2023.09
 module load pytorch-gpu/py3/2.1.1
-
-# Install NLTK if not already installed (using the Python from pytorch module)
-python -m pip install --user nltk
-
-# Download NLTK data
-python -c "
-import nltk
-import os
-nltk_data_dir = os.path.expanduser('~/nltk_data')
-os.makedirs(nltk_data_dir, exist_ok=True)
-try:
-    nltk.download('punkt', download_dir=nltk_data_dir, quiet=True)
-    nltk.download('averaged_perceptron_tagger', download_dir=nltk_data_dir, quiet=True)
-    print('NLTK data downloaded successfully')
-except Exception as e:
-    print(f'Error downloading NLTK data: {e}')
-"
 
 # Set NLTK data path
 export NLTK_DATA="$HOME/nltk_data"
