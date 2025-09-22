@@ -2,7 +2,6 @@
 #SBATCH --job-name=checkpoint_eval
 #SBATCH --array=0-19  
 #SBATCH --time=2:00:00
-#SBATCH --mem=16G
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/eval_%A_%a.out
 #SBATCH --error=logs/eval_%A_%a.err
