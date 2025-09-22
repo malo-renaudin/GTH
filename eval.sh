@@ -45,6 +45,22 @@ declare -A DATA_PATHS=(
     ["train_TransformerLM_rc_0032_q_0200"]="modulated_sets/rc_0032_q_0200"
 )
 
+module purge
+module load pytorch-gpu/py3/2.1.1  # or whatever PyTorch version you need
+module load python/3.11.0         # or your preferred Python version
+
+# Activate your virtual environment if you have one
+# source /path/to/your/venv/bin/activate
+
+# Install NLTK if not already installed
+pip install --user nltk
+
+# Download NLTK data
+python -c "import nltk; nltk.download('punkt', download_dir='~/nltk_data'); nltk.download('averaged_perceptron_tagger', download_dir='~/nltk_data')"
+
+# Set NLTK data path
+export NLTK_DATA="$HOME/nltk_data"
+
 # Get checkpoint directories
 CHECKPOINTS=($(find "$PARENT_DIR" -mindepth 1 -maxdepth 1 -type d | sort))
 CHECKPOINT_DIR="${CHECKPOINTS[$SLURM_ARRAY_TASK_ID]}"
