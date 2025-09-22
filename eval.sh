@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=checkpoint_eval
 #SBATCH --array=0-19  
-#SBATCH --time=02:00:00
+#SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/eval_%A_%a.out
 #SBATCH --error=logs/eval_%A_%a.err
@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu_p6
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=malorenaudin1@gmail.com
-#SBATCH --qos=qos_gpu_h100-dev
+#SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --signal=SIGUSR1@90
 
 # MODIFY THESE PATHS
