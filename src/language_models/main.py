@@ -238,11 +238,13 @@ def train():
                 epoch, batch, len(train_data)//args.bptt, cur_loss, math.exp(cur_loss),
                 grad_norm, batch_time*1000/args.log_interval, mem_usage, gpu_mem
             ))
+            total_loss = 0
+            start_time = time.time()
 
         if epoch==1 :
-            if batch < 300 : 
-                save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
-            if batch > 300 and batch < 1000 and batch%100==0:
+            # if batch < 300 and batch%50==0: 
+            #     save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
+            if batch < 1000 and batch%100==0:
                 save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
             if batch > 1000 and batch%500==0:
                 save_checkpoint(model=model, optimizer=optimizer, experiment_name=args.name, epoch=epoch, temperature=1, checkpoint_dir=args.checkpoint_dir, batch=batch)
