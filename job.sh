@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=lm_train         #
-#SBATCH --array=0-11
+#SBATCH --array=0-15
 #SBATCH --output=job_outputs/job_%A_%a.out
 #SBATCH --error=job_outputs/job_%A_%a.err
 #SBATCH --ntasks=1
@@ -21,12 +21,14 @@ mkdir -p job_outputs
 
 # Define datasets and model configs
 DATASETS=(
-    "english_data"
-    "modulated_sets/rc_0008_q_0050"
-    "modulated_sets/rc_0008_q_0100"
-    "modulated_sets/rc_0016_q_0050"
-    "modulated_sets/rc_0016_q_0100"
-    "modulated_sets/rc_0032_q_0200"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00009_tQ0.00500"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00009_tQ0.02000"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00020_tQ0.00250"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00020_tQ0.00500"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00020_tQ0.02000"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00100_tQ0.00250"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00100_tQ0.00500"
+    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00100_tQ0.02000"
 )
 
 MODELS=(
