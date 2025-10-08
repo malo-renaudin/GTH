@@ -10,3 +10,11 @@ stimuli_generator/test_questions.txt
 stimuli_generator/relative_clauses.txt
 stimuli_generator/test_relative_clauses.txt
 *.txt
+checkpoints/
+*.pt
+useless/
+data/
+stimuli_generator/*.txt
+tests/datasets
+*.json
+*.log
