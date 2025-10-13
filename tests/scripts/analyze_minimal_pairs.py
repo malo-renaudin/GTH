@@ -5,20 +5,10 @@ from src.language_models.model import RNNModel as lstm
 from src.language_models.dictionary_corpus import Dictionary
 from nltk import pos_tag, download as nltk_download
 import argparse
-# --- utilities ---
-def resolve_device(dev_arg):
-    if dev_arg == 'auto':
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    return torch.device('cuda' if dev_arg == 'cuda' and torch.cuda.is_available() else 'cpu')
+from pathlib import Path
 
-def safe_basename(path): 
-    return os.path.basename(path.rstrip('/'))
 
 # --- model / checkpoint helpers ---
-def build_model(dictionary, device, hidden_size=650):
-    V = len(dictionary) if hasattr(dictionary, '__len__') else len(dictionary.idx2word)
-    m = RNNModel("LSTM", V, hidden_size, hidden_size, 2, 0.2, False)
-    return m.to(device)
 
 def load_checkpoint(model, checkpoint_path, device='auto'):
     if device == 'auto':
@@ -89,7 +79,7 @@ def compute_noun_mass_difference(model, d, m, noun_indices, batch_size, device):
     return torch.cat(diffs).mean().item()
 
 def eval(checkpoint, dataset, dictionary, batch_size, test, device):
-    model = lstm("LSTM", len(dictionary), 650, 650, 2, 0.2, False)
+    model = lstm("LSTM", len(dictionary), 650, 650, 2, 0, False)
     model = load_checkpoint(model=model, checkpoint_path=checkpoint, device = device)
     d, m =tokenize_sentences(dataset, dictionary, test)
     noun_indices = find_noun_indices(dictionary)
@@ -135,22 +125,24 @@ def main():
     checkpoint_files = glob.glob(checkpoint_pattern)
     checkpoint_files = sorted(checkpoint_files, key=get_checkpoint_sort_key)
     
-    dataset_wh = pd.read_csv('wh_question_dataset.csv')
-    dataset_orc = pd.read_csv('object_relative_dataset.csv')
+    dataset_wh = pd.read_csv('tests/datasets/wh_question_dataset.json')
+    dataset_orc = pd.read_csv('tests/datasets/object_relative_dataset.json')
     
     dictionary = Dictionary(args.data_path)
     metric = {}
     metric['wh'] = {}
     metric['orc']={}
     for i, checkpoint_path in enumerate(tqdm(checkpoint_files, desc="Evaluating checkpoints")):
-        mean_diff_wh = eval(checkpoint = checkpoint_path, dataset = dataset_wh, dictionary = dictionary, batch_size = 10, test = 'wh', device = 'cuda')
-        mean_diff_orc = eval(checkpoint = checkpoint_path, dataset = dataset_orc, dictionary = dictionary, batch_size = 10, test = 'orc', device = 'cuda')
+        mean_diff_wh = eval(checkpoint = checkpoint_path, dataset = dataset_wh, dictionary = dictionary, batch_size = 100, test = 'wh', device = 'cuda')
+        mean_diff_orc = eval(checkpoint = checkpoint_path, dataset = dataset_orc, dictionary = dictionary, batch_size = 100, test = 'orc', device = 'cuda')
         epoch = extract_epoch_from_path(checkpoint_path)
         batch = extract_batch_from_path(checkpoint_path)
         metric['wh'][f'{epoch}_{batch}']=mean_diff_wh
         metric['orc'][f'{epoch}_{batch}']=mean_diff_orc
      
-    results_file = os.path.join(args.output_dir, f'obj_wh_test_{args.checkpoint_dir}.json')
+    results_file = Path(args.output_dir) / f'lstm_{args.checkpoint_dir}.json'
+    results_file.parent.mkdir(parents=True, exist_ok=True)    
+    
     with open(results_file, 'w') as f:
         json.dump(metric, f, indent=2)
     print(f"\nResults saved to {results_file}")
