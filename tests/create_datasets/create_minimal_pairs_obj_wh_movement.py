@@ -148,9 +148,9 @@ with open(csv_filename, 'w', newline='', encoding='utf-8') as f:
     writer.writerows(dataset)
 
 # Export as JSON
-# json_filename = "wh_question_dataset.json"
-# with open(json_filename, 'w', encoding='utf-8') as f:
-#     json.dump(dataset, f, indent=2)
+json_filename = "wh_question_dataset.json"
+with open(json_filename, 'w', encoding='utf-8') as f:
+    json.dump(dataset, f, indent=2)
 
 print(f"Dataset created with {len(dataset)} matched pairs")
 print(f"Saved to: {csv_filename} and {json_filename}")
