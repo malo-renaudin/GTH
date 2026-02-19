@@ -92,182 +92,48 @@ class RNNModel(nn.Module):
 
 
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, n_heads, dropout=0.1):
+class Transformer(nn.Module):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6, dim_feedforward=2048, dropout=0.1):
         super().__init__()
-        assert d_model % n_heads == 0
-        
         self.d_model = d_model
-        self.n_heads = n_heads
-        self.d_k = d_model // n_heads
         
-        self.w_q = nn.Linear(d_model, d_model)
-        self.w_k = nn.Linear(d_model, d_model)
-        self.w_v = nn.Linear(d_model, d_model)
-        self.w_o = nn.Linear(d_model, d_model)
+        # 1. Embedding + Positional Encoding
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = nn.Parameter(torch.zeros(1, 1024, d_model)) # Simplified learnable PE
         
-        self.dropout = nn.Dropout(dropout)
+        # 2. Define the Encoder Layer
+        # 'batch_first=True' expects input shape: [batch, seq, feature]
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, 
+            nhead=nhead, 
+            dim_feedforward=dim_feedforward, 
+            dropout=dropout,
+            batch_first=True,
+            norm_first=False # 'Classic' puts Norm after Attention/FFN
+        )
         
-    def forward(self, x, mask=None):
-        batch_size, seq_len, d_model = x.shape
+        # 3. Stack the layers
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Linear projections
-        Q = self.w_q(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        K = self.w_k(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        V = self.w_v(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
-        
-        # Attention
-        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        
-        if mask is not None:
-            attention_scores = attention_scores.masked_fill(mask == 0, -1e9)
-        
-        attention_weights = F.softmax(attention_scores, dim=-1)
-        attention_weights = self.dropout(attention_weights)
-        
-        # Apply attention to values
-        output = torch.matmul(attention_weights, V)
-        
-        # Concatenate heads
-        output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
-        
-        return self.w_o(output)
+        # 4. Output projection back to vocab
+        self.fc_out = nn.Linear(d_model, vocab_size)
 
+    def generate_causal_mask(self, sz):
+        """Generates a square mask for the sequence. Masked positions are filled with -inf."""
+        mask = torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+        return mask
 
-class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff, dropout=0.1):
-        super().__init__()
-        self.linear1 = nn.Linear(d_model, d_ff)
-        self.linear2 = nn.Linear(d_ff, d_model)
-        self.dropout = nn.Dropout(dropout)
-        
     def forward(self, x):
-        return self.linear2(self.dropout(F.relu(self.linear1(x))))
-
-
-class TransformerBlock(nn.Module):
-    def __init__(self, d_model, n_heads, d_ff, dropout=0.1):
-        super().__init__()
-        self.attention = MultiHeadAttention(d_model, n_heads, dropout)
-        self.feed_forward = FeedForward(d_model, d_ff, dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
+        # x shape: [batch_size, seq_len]
+        seq_len = x.size(1)
+        mask = self.generate_causal_mask(seq_len).to(x.device)
         
-    def forward(self, x, mask=None):
-        # Self-attention with residual connection
-        attn_output = self.attention(x, mask)
-        x = self.norm1(x + self.dropout(attn_output))
+        # Pass through embedding and add PE
+        x = self.embedding(x) * math.sqrt(self.d_model)
+        x = x + self.pos_encoder[:, :seq_len, :]
         
-        # Feed-forward with residual connection
-        ff_output = self.feed_forward(x)
-        x = self.norm2(x + self.dropout(ff_output))
+        # Transformer Encoder with Causal Mask
+        # is_causal=True (in newer PyTorch) or passing tgt_mask ensures GPT-style autoregression
+        output = self.transformer_encoder(x, mask=mask)
         
-        return x
-
-
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
-        super().__init__()
-        
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len).unsqueeze(1).float()
-        
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
-                           -(math.log(10000.0) / d_model))
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        
-        self.register_buffer('pe', pe.unsqueeze(0))
-        
-    def forward(self, x):
-        return x + self.pe[:, :x.size(1)]
-
-
-class TransformerLM(nn.Module):
-    def __init__(self, vocab_size, d_model=512, n_heads=8, n_layers=6, 
-                 d_ff=2048, max_len=5000, dropout=0.1, tie_weights=True):
-        super().__init__()
-        
-        self.d_model = d_model
-        self.vocab_size = vocab_size
-        
-        # Token embedding
-        self.token_embedding = nn.Embedding(vocab_size, d_model)
-        
-        # Positional encoding
-        self.pos_encoding = PositionalEncoding(d_model, max_len)
-        
-        # Transformer blocks
-        self.transformer_blocks = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff, dropout)
-            for _ in range(n_layers)
-        ])
-        
-        # Output layer
-        self.ln_f = nn.LayerNorm(d_model)
-        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
-        
-        # Weight tying
-        if tie_weights:
-            self.lm_head.weight = self.token_embedding.weight
-        
-        self.dropout = nn.Dropout(dropout)
-        
-        # Initialize weights
-        self.apply(self._init_weights)
-        
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-        elif isinstance(module, nn.LayerNorm):
-            torch.nn.init.zeros_(module.bias)
-            torch.nn.init.ones_(module.weight)
-    
-    def create_causal_mask(self, seq_len, device):
-        """Create causal mask to prevent attention to future tokens"""
-        mask = torch.tril(torch.ones(seq_len, seq_len, device=device))
-        return mask.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, seq_len, seq_len)
-    
-    def forward(self, input_ids, targets=None):
-        """
-        Args:
-            input_ids: (batch_size, seq_len) - token indices
-            targets: (batch_size, seq_len) - target tokens for loss calculation
-        
-        Returns:
-            if targets is None: logits (batch_size, seq_len, vocab_size)
-            if targets provided: (loss, logits)
-        """
-        batch_size, seq_len = input_ids.shape
-        
-        # Token embeddings
-        token_emb = self.token_embedding(input_ids)  # (batch_size, seq_len, d_model)
-        token_emb = token_emb * math.sqrt(self.d_model)  # Scale embeddings
-        
-        # Add positional encoding
-        x = self.pos_encoding(token_emb)
-        x = self.dropout(x)
-        
-        # Create causal mask
-        causal_mask = self.create_causal_mask(seq_len, input_ids.device)
-        
-        # Pass through transformer blocks
-        for block in self.transformer_blocks:
-            x = block(x, causal_mask)
-        
-        # Final layer norm
-        x = self.ln_f(x)
-        
-        # Language modeling head
-        logits = self.lm_head(x)  # (batch_size, seq_len, vocab_size)
-        
-        
-        return logits
-    
-    
+        return self.fc_out(output)
