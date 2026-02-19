@@ -219,9 +219,9 @@ def load_model(
         model = m.Transformer(
             vocab_size=ntokens,
             d_model=model_dim,        # Use the d_model parameter
-            n_heads=nheads,
-            n_layers=nlayers,
-            d_ff=feed_forward_dim,    # Use the d_ff parameter
+            nhead=nheads,
+            num_layers=nlayers,
+            dim_feedforward=feed_forward_dim,    # Use the d_ff parameter
             dropout=dropout,
             tie_weights=tied,
             max_len=128,
