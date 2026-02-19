@@ -28,7 +28,7 @@ DATASETS=(
 )
 
 MODELS=(
-    "RNNModel"
+    # "RNNModel"
     "Transformer"
 )
 

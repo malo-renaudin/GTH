@@ -212,11 +212,11 @@ def load_model(
     
     if classmodel == "RNNModel":
         model = m.RNNModel(model, ntokens, emsize, nhid, nlayers, dropout, tied)
-    elif classmodel == 'TransformerLM':
+    elif classmodel == 'Transformer':
         model_dim = d_model if d_model is not None else emsize
         feed_forward_dim = d_ff if d_ff is not None else model_dim * 4
         
-        model = m.TransformerLM(
+        model = m.Transformer(
             vocab_size=ntokens,
             d_model=model_dim,        # Use the d_model parameter
             n_heads=nheads,
