@@ -29,7 +29,7 @@ DATASETS=(
 
 MODELS=(
     "RNNModel"
-    "TransformerLM"
+    "Transformer"
 )
 
 # Each array task runs a unique combination of dataset and model
