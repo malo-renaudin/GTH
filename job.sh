@@ -21,14 +21,10 @@ mkdir -p job_outputs
 
 # Define datasets and model configs
 DATASETS=(
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00009_tQ0.00500"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00009_tQ0.02000"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00020_tQ0.00250"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00020_tQ0.00500"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00020_tQ0.02000"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00100_tQ0.00250"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00100_tQ0.00500"
-    "modulated_sets/sRC0.00009_sQ0.00250_tRC0.00100_tQ0.02000"
+    "orc_datasets/freq_8"
+    "orc_datasets/freq_16"
+    "orc_datasets/freq_32"
+    "data/english_data"
 )
 
 MODELS=(
@@ -65,8 +61,9 @@ if [ "$MODEL" == "RNNModel" ]; then
         --nhid 650 \
         --nlayers 2 \
         --optimizer 'Adam' \
-        --epochs 40 \
+        --epochs 10 \
         --lr 0.001 \
+        --bptt 128 \
         --cuda
 else
     python src/language_models/main.py \
@@ -80,7 +77,7 @@ else
         --d_ff 1300 \
         --nlayers 2 \
         --optimizer 'Adam' \
-        --epochs 40 \
+        --epochs 10 \
         --lr 0.001 \
         --bptt 128 \
         --cuda
