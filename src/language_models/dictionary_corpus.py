@@ -9,6 +9,7 @@ import os
 import torch
 from collections import defaultdict
 import logging
+import random
 
 class Dictionary(object):
     def __init__(self, path):
@@ -53,27 +54,29 @@ class Corpus(object):
         self.test = tokenize(self.dictionary, os.path.join(path, 'test.txt'))
 
 
-def tokenize(dictionary, path):
+def tokenize(dictionary, path, shuffle =False):
     """Tokenizes a text file for training or testing to a sequence of indices format
        We assume that training and test data has <eos> symbols """
     assert os.path.exists(path)
     with open(path, 'r', encoding="utf8") as f:
-        ntokens = 0
-        for line in f:
-            words = line.split()
-            ntokens += len(words)
+        lines = f.readlines()
+    if shuffle:
+        random.shuffle(lines)
+    ntokens = 0
+    for line in lines:
+        words = line.split()
+        ntokens += len(words)
 
     # Tokenize file content
-    with open(path, 'r', encoding="utf8") as f:
-        ids = torch.LongTensor(ntokens)
-        token = 0
-        for line in f:
-            words = line.split()
-            for word in words:
-                if word in dictionary.word2idx:
-                    ids[token] = dictionary.word2idx[word]
-                else:
-                    ids[token] = dictionary.word2idx["<unk>"]
-                token += 1
+    ids = torch.LongTensor(ntokens)
+    token = 0
+    for line in lines:
+        words = line.split()
+        for word in words:
+            if word in dictionary.word2idx:
+                ids[token] = dictionary.word2idx[word]
+            else:
+                ids[token] = dictionary.word2idx["<unk>"]
+            token += 1
 
     return ids

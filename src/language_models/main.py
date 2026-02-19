@@ -65,7 +65,7 @@ logging.info("Loading data")
 start = time.time()
 
 # # Old way to load data (from colorlessgreenRNNs)
-corpus = Corpus(args.data, save_tokenized=False)
+corpus = Corpus(args.data)
 logging.info("( %.2f )" % (time.time() - start))
 ntokens = len(corpus.dictionary)
 logging.info("Vocab size %d", ntokens)
