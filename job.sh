@@ -24,7 +24,7 @@ DATASETS=(
     "orc_datasets/freq_8"
     "orc_datasets/freq_16"
     "orc_datasets/freq_32"
-    "data/english_data"
+    "base_data"
 )
 
 MODELS=(
