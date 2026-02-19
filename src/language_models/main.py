@@ -9,13 +9,11 @@ import argparse
 import logging
 import math
 import time
-import pandas as pd
 import torch
 import torch.nn as nn
 import os
-import gc
 import psutil
-from dictionary_corpus import Corpus, TextDataset, Vocabulary, word_tokenizer, collate_batch, tokenize
+from dictionary_corpus import Corpus, tokenize
 import model
 from lm_argparser import lm_parser
 from utils import (
@@ -26,17 +24,10 @@ from utils import (
     move_to_device,
     save_val_loss_data,
     load_model,
-    get_memory_usage,
-    log_memory_usage,
     clear_memory,
-    TemperatureScheduler,
-    pick_lt_st_indices,
-    create_dataloaders
 )
 import torch.optim as optim
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
-import multiprocessing as mp
+
 
 
 
