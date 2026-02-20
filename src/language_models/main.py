@@ -146,7 +146,7 @@ def evaluate(data_source):
         # for batch_idx, (data, targets) in enumerate(val_data):
         #     data, targets = data.to(device, non_blocking=True), targets.to(device, non_blocking=True)
 
-            if args.classmodel == 'TransformerLM':
+            if args.classmodel == 'Transformer':
                 data = data.transpose(0, 1)
                 output = model(data)  # No hidden state needed
                 output_flat = output.view(-1, ntokens)
@@ -203,11 +203,14 @@ def train():
             loss = criterion(output.view(-1, ntokens),
                                 targets)  # +reg*loss_reg
         # Around line where you have the other model conditions
-        elif args.classmodel == 'TransformerLM':
+        elif args.classmodel == 'Transformer':
             data = data.transpose(0, 1)
             output = model(data)  # No hidden state needed
             loss = criterion(output.view(-1, ntokens), targets)
             del output
+
+        else :
+            raise ValueError(f"Unknown model type: classmodel={args.classmodel}, model={args.model}")
         
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)

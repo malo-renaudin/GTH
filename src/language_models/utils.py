@@ -212,7 +212,7 @@ def load_model(
     
     if classmodel == "RNNModel":
         model = m.RNNModel(model, ntokens, emsize, nhid, nlayers, dropout, tied)
-    elif classmodel == 'Transformer':
+    elif classmodel == "Transformer":
         model_dim = d_model if d_model is not None else emsize
         feed_forward_dim = d_ff if d_ff is not None else model_dim * 4
         
