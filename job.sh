@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_train         #
-#SBATCH --array=0-1
-#SBATCH --output=job_outputs/lower_freq/job_%A_%a.out
-#SBATCH --error=job_outputs/lower_freq/job_%A_%a.err
+#SBATCH --array=0-5
+#SBATCH --output=job_outputs/transformer/job_%A_%a.out
+#SBATCH --error=job_outputs/transformer/job_%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
@@ -17,17 +17,21 @@
 #SBATCH --signal=SIGUSR1@90
 
 # Create output directory
-mkdir -p job_outputs
+mkdir -p job_outputs/transformer
 
 # Define datasets and model configs
 DATASETS=(
     "orc_datasets/freq_4"
     "orc_datasets/freq_6"
+    "orc_datasets/freq_8"
+    "orc_datasets/freq_16"
+    "orc_datasets/freq_32"
+    "base_data"
 )
 
 MODELS=(
-    "RNNModel"
-    # "Transformer"
+    # "RNNModel"
+    "Transformer"
 )
 
 # Each array task runs a unique combination of dataset and model
