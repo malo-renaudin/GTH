@@ -16,7 +16,7 @@
 #SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --signal=SIGUSR1@90
 
-MODELS=("train_RNNModel_base_data" "train_RNNModel_freq_16" "train_RNNModel_freq_8" "train_RNNModel_freq_32")
+MODELS=("train_RNNModel_freq_4" "train_RNNModel_freq_6")
 TEST_FILES="base_data/test.txt test_orc.txt"
 
 MODEL=${MODELS[$SLURM_ARRAY_TASK_ID]}
