@@ -207,7 +207,7 @@ def load_model(
     d_ff=None,
     **kwargs
 ):
-    import model as m
+    import src.language_models.model as m
     import torch
     
     if classmodel == "RNNModel":
@@ -223,7 +223,6 @@ def load_model(
             num_layers=nlayers,
             dim_feedforward=feed_forward_dim,    # Use the d_ff parameter
             dropout=dropout,
-            tie_weights=tied,
             max_len=128,
         )
     optimizer_state_dict = None
