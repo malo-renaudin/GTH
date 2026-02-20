@@ -45,7 +45,7 @@ for test_file in args.test_files:
         model.eval()
         total_loss = 0.0
         total_tokens = 0
-        criterion = torch.nn.CrossEntropyLoss()
+        criterion = torch.nn.CrossEntropyLoss(reduction='sum')
         with torch.no_grad():
             hidden = model.init_hidden(10)
             for i in range(0, test_data.size(0) - 1, 35):
