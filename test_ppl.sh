@@ -21,7 +21,7 @@ TEST_FILES="base_data/test.txt test_orc.txt"
 CSV_NAMES="results_base_data.csv results_test_orc.csv"
 
 for MODEL in "${MODELS[@]}"; do
-    python test_models.py \
+    python test_ppl.py \
         --checkpoint_dir "checkpoint/$MODEL" \
         --test_files $TEST_FILES \
         --csv_names $CSV_NAMES
