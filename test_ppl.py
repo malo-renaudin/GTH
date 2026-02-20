@@ -5,6 +5,7 @@ import torch
 import argparse
 from src.language_models.utils import load_model, batchify, get_batch
 from src.language_models.dictionary_corpus import Dictionary, tokenize
+import logging 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint_dir", type=str, required=True)
@@ -26,9 +27,13 @@ model_type = "LSTM"
 
 checkpoints = sorted(glob.glob(os.path.join(args.checkpoint_dir, "*.pt")))
 
+
 for test_file in args.test_files:
     test_ids = tokenize(dictionary, test_file)
     test_data = batchify(test_ids, 10, device)
+    logging.info(f"Checkpoints found: {checkpoints}")
+    logging.info(f"Test file: {test_file}")
+    logging.info(f"Test data shape: {test_data.shape}")
     ntokens = len(dictionary)
     results = []
     for ckpt in checkpoints:
@@ -51,6 +56,7 @@ for test_file in args.test_files:
         avg_loss = total_loss / (len(test_data) - 1)
         ppl = torch.exp(torch.tensor(avg_loss)).item()
         results.append({"checkpoint": os.path.basename(ckpt), "perplexity": ppl})
+        logging.info(f"Results: {results}")
     test_base = os.path.splitext(os.path.basename(test_file))[0]
     csv_name = f"results_{test_base}_{args.model_name}.csv"
     pd.DataFrame(results).to_csv(csv_name, index=False)
