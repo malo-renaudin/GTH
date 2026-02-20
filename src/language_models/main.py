@@ -115,8 +115,16 @@ if args.optimizer == "SGD":
     lr = 10
     optimizer = optim.SGD(model.parameters(), lr=lr)
 elif args.optimizer == "Adam":
-    lr = 0.001
-    optimizer = optim.AdamW(model.parameters(), lr=lr)
+    if args.classmodel == "Transformer":
+        lr = 0.0005
+        optimizer = optim.AdamW(model.parameters(), lr=lr)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=lambda step: min((step + 1) / 4000, 1.0)
+        )
+    else:
+        lr = 0.001
+        optimizer = optim.AdamW(model.parameters(), lr=lr)
+        scheduler = None
 else:
     raise ValueError(f"Invalid optimizer: {args.optimizer}")
 if optimizer_state_dict is not None:
