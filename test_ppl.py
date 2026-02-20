@@ -9,7 +9,6 @@ from src.language_models.dictionary_corpus import Dictionary, tokenize
 parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint_dir", type=str, required=True)
 parser.add_argument("--test_files", nargs="+", required=True)
-parser.add_argument("--csv_names", nargs="+", required=True)
 parser.add_argument("--model_name", type=str, required=True)
 args = parser.parse_args()
 
@@ -27,7 +26,7 @@ model_type = "LSTM"
 
 checkpoints = sorted(glob.glob(os.path.join(args.checkpoint_dir, "*.pt")))
 
-for test_file, csv_name in zip(args.test_files, args.csv_names):
+for test_file in args.test_files:
     test_ids = tokenize(dictionary, test_file)
     test_data = batchify(test_ids, 10, device)
     ntokens = len(dictionary)
