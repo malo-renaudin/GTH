@@ -18,19 +18,21 @@
 
 MODELS=("train_RNNModel_base_data" "train_RNNModel_freq_16" "train_RNNModel_freq_8" "train_RNNModel_freq_32")
 TEST_FILES="base_data/test.txt test_orc.txt"
-CSV_NAMES="results_base_data.csv results_test_orc.csv"
 
 for MODEL in "${MODELS[@]}"; do
     python test_ppl.py \
         --checkpoint_dir "checkpoint/$MODEL" \
         --test_files $TEST_FILES \
-        --csv_names $CSV_NAMES \
         --model_name "$MODEL"
 done
 
 # Concatenate CSVs for each test set
-for TEST in "${TEST_FILES[@]}"; do
+for TEST in ${TEST_FILES}; do
     TEST_BASE=$(basename "$TEST" .txt)
-    csvs=$(ls results_${TEST_BASE}_*.csv)
-    paste -d',' $csvs > results_${TEST_BASE}_all.csv
+    csvs=$(ls results_${TEST_BASE}_*.csv 2>/dev/null)
+    if [ -n "$csvs" ]; then
+        paste -d',' $csvs > results_${TEST_BASE}_all.csv
+    else
+        echo "No CSVs found for $TEST_BASE"
+    fi
 done
