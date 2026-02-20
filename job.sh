@@ -21,15 +21,13 @@ mkdir -p job_outputs
 
 # Define datasets and model configs
 DATASETS=(
-    "orc_datasets/freq_8"
-    "orc_datasets/freq_16"
-    "orc_datasets/freq_32"
-    "base_data"
+    "orc_datasets/freq_4"
+    "orc_datasets/freq_6"
 )
 
 MODELS=(
     "RNNModel"
-    "Transformer"
+    # "Transformer"
 )
 
 # Each array task runs a unique combination of dataset and model
