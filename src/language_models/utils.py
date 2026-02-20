@@ -207,7 +207,7 @@ def load_model(
     d_ff=None,
     **kwargs
 ):
-    import model as m
+    import src.language_models.model as m
     import torch
     
     if classmodel == "RNNModel":
