@@ -74,7 +74,7 @@ elif [ "$MODEL" == "GPT2" ]; then
         --data $DATASET \
         --name $EXPERIMENT_NAME \
         --classmodel $MODEL \
-        --batch_size 512 \
+        --batch_size 128 \
         --optimizer 'Adam' \
         --epochs 10 \
         --lr 0.0005 \
