@@ -27,6 +27,8 @@ from utils import (
     clear_memory,
 )
 import torch.optim as optim
+from torch.optim import AdamW
+from transformers import get_linear_schedule_with_warmup
 
 
 
@@ -115,11 +117,21 @@ if args.optimizer == "SGD":
     lr = 10
     optimizer = optim.SGD(model.parameters(), lr=lr)
 elif args.optimizer == "Adam":
-    if args.classmodel == "Transformer":
-        lr = 0.0005
-        optimizer = optim.AdamW(model.parameters(), lr=lr)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer, lr_lambda=lambda step: min((step + 1) / 4000, 1.0)
+    if args.classmodel == "Transformer" or args.classmodel == "GPT2":
+        optimizer = AdamW(
+            model.parameters(),
+            lr=5e-4,             # GPT-2 paper default
+            betas=(0.9, 0.95),   # GPT-2 betas
+            weight_decay=0.01
+        )
+
+        num_training_steps = len(train_data) // args.bptt * args.epochs
+        num_warmup_steps = 2000
+
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps
         )
     else:
         lr = 0.001
@@ -223,6 +235,8 @@ def train():
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
         optimizer.step()
+        if scheduler :
+            scheduler.step()
 
 
         total_loss += loss.item()

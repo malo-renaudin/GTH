@@ -225,6 +225,13 @@ def load_model(
             dropout=dropout,
             max_len=128,
         )
+    elif classmodel == "GPT2":
+        from transformers import GPT2LMHeadModel, GPT2Config
+        config = GPT2Config(
+            vocab_size=ntokens,
+        )
+        model = GPT2LMHeadModel(config)
+        
     optimizer_state_dict = None
     if checkpoint_path:
         with open(checkpoint_path, "rb") as f:

@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=transformer_train         #
+#SBATCH --job-name=gpt2_train         #
 #SBATCH --array=0-5
-#SBATCH --output=job_outputs/transformer/job_%A_%a.out
-#SBATCH --error=job_outputs/transformer/job_%A_%a.err
+#SBATCH --output=job_outputs/gpt2/job_%A_%a.out
+#SBATCH --error=job_outputs/gpt2/job_%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
@@ -17,7 +17,7 @@
 #SBATCH --signal=SIGUSR1@90
 
 # Create output directory
-mkdir -p job_outputs/transformer
+mkdir -p job_outputs/gpt2
 
 # Define datasets and model configs
 DATASETS=(
@@ -31,7 +31,8 @@ DATASETS=(
 
 MODELS=(
     # "RNNModel"
-    "Transformer"
+    # "Transformer"
+    "GPT2"
 )
 
 # Each array task runs a unique combination of dataset and model
@@ -65,6 +66,18 @@ if [ "$MODEL" == "RNNModel" ]; then
         --optimizer 'Adam' \
         --epochs 10 \
         --lr 0.001 \
+        --bptt 128 \
+        --cuda
+
+elif [ "$MODEL" == "GPT2" ]; then
+    python src/language_models/main.py \
+        --data $DATASET \
+        --name $EXPERIMENT_NAME \
+        --classmodel $MODEL \
+        --batch_size 512 \
+        --optimizer 'Adam' \
+        --epochs 10 \
+        --lr 0.0005 \
         --bptt 128 \
         --cuda
 else
