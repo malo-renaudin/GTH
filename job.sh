@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_train         #
 #SBATCH --array=0-7
-#SBATCH --output=job_outputs/job_%A_%a.out
-#SBATCH --error=job_outputs/job_%A_%a.err
+#SBATCH --output=job_outputs/lower_freq/job_%A_%a.out
+#SBATCH --error=job_outputs/lower_freq/job_%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
