@@ -44,6 +44,7 @@ for test_file in args.test_files:
         )
         model.eval()
         total_loss = 0.0
+        total_tokens = 0
         criterion = torch.nn.CrossEntropyLoss()
         with torch.no_grad():
             hidden = model.init_hidden(10)
@@ -54,8 +55,9 @@ for test_file in args.test_files:
                 output_flat = output.view(-1, ntokens)
                 loss = criterion(output_flat, targets)
                 total_loss += loss.item()
+                total_tokens += targets.numel()
                 hidden = tuple(h.detach() for h in hidden)
-        avg_loss = total_loss / (len(test_data) - 1)
+        avg_loss = total_loss / total_tokens
         ppl = torch.exp(torch.tensor(avg_loss)).item()
         results.append({"checkpoint": os.path.basename(ckpt), "perplexity": ppl})
         logging.info(f"Results: {results}")
