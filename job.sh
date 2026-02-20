@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_train         #
-#SBATCH --array=0-7
+#SBATCH --array=0-1
 #SBATCH --output=job_outputs/lower_freq/job_%A_%a.out
 #SBATCH --error=job_outputs/lower_freq/job_%A_%a.err
 #SBATCH --ntasks=1
