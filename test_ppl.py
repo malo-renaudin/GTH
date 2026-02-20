@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint_dir", type=str, required=True)
 parser.add_argument("--test_files", nargs="+", required=True)
 parser.add_argument("--csv_names", nargs="+", required=True)
+parser.add_argument("--model_name", type=str, required=True)
 args = parser.parse_args()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"

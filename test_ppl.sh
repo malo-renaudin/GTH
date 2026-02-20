@@ -24,7 +24,8 @@ for MODEL in "${MODELS[@]}"; do
     python test_ppl.py \
         --checkpoint_dir "checkpoint/$MODEL" \
         --test_files $TEST_FILES \
-        --csv_names $CSV_NAMES
+        --csv_names $CSV_NAMES \
+        --model_name "$MODEL"
 done
 
 # Concatenate CSVs for each test set
