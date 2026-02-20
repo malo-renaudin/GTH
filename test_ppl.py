@@ -1,5 +1,6 @@
 import os
 import glob
+import sys
 import pandas as pd
 import torch
 import argparse
@@ -7,6 +8,7 @@ from src.language_models.utils import load_model, batchify, get_batch
 from src.language_models.dictionary_corpus import Dictionary, tokenize
 import logging 
 
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint_dir", type=str, required=True)
 parser.add_argument("--test_files", nargs="+", required=True)
