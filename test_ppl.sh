@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=test_ppl         #
-#SBATCH --array=0-3
+#SBATCH --array=0-1
 #SBATCH --output=job_outputs/test_ppl/job_%A_%a.out
 #SBATCH --error=job_outputs/test_ppl/job_%A_%a.err
 #SBATCH --ntasks=1
