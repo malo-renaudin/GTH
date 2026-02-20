@@ -93,13 +93,14 @@ class RNNModel(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6, dim_feedforward=2048, dropout=0.1, max_len=1024):
         super().__init__()
         self.d_model = d_model
+        self.max_len = max_len
         
         # 1. Embedding + Positional Encoding
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_encoder = nn.Parameter(torch.zeros(1, 1024, d_model)) # Simplified learnable PE
+        self.pos_encoder = nn.Parameter(torch.zeros(1, max_len, d_model)) # Simplified learnable PE
         
         # 2. Define the Encoder Layer
         # 'batch_first=True' expects input shape: [batch, seq, feature]
