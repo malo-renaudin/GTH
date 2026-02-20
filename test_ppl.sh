@@ -21,7 +21,7 @@ TEST_FILES="base_data/test.txt test_orc.txt"
 
 for MODEL in "${MODELS[@]}"; do
     python test_ppl.py \
-        --checkpoint_dir "checkpoint/$MODEL" \
+        --checkpoint_dir "checkpoints/$MODEL" \
         --test_files $TEST_FILES \
         --model_name "$MODEL"
 done
