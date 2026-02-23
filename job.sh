@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test_gpt2       #
+#SBATCH --job-name=test_gpt2_larger_lr_sl       #
 #SBATCH --array=0-0
 #SBATCH --output=job_outputs/gpt2/job_%A_%a.out
 #SBATCH --error=job_outputs/gpt2/job_%A_%a.err
@@ -74,11 +74,11 @@ elif [ "$MODEL" == "GPT2" ]; then
         --data $DATASET \
         --name $EXPERIMENT_NAME \
         --classmodel $MODEL \
-        --batch_size 128 \
+        --batch_size 512 \
         --optimizer 'Adam' \
         --epochs 10 \
         --lr 0.0005 \
-        --bptt 128 \
+        --bptt 1024 \
         --cuda
 else
     python src/language_models/main.py \
