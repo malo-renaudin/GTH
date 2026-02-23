@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=gpt2_train         #
-#SBATCH --array=0-5
+#SBATCH --job-name=test_gpt2       #
+#SBATCH --array=0-0
 #SBATCH --output=job_outputs/gpt2/job_%A_%a.out
 #SBATCH --error=job_outputs/gpt2/job_%A_%a.err
 #SBATCH --ntasks=1
@@ -21,11 +21,11 @@ mkdir -p job_outputs/gpt2
 
 # Define datasets and model configs
 DATASETS=(
-    "orc_datasets/freq_4"
-    "orc_datasets/freq_6"
-    "orc_datasets/freq_8"
-    "orc_datasets/freq_16"
-    "orc_datasets/freq_32"
+    # "orc_datasets/freq_4"
+    # "orc_datasets/freq_6"
+    # "orc_datasets/freq_8"
+    # "orc_datasets/freq_16"
+    # "orc_datasets/freq_32"
     "base_data"
 )
 

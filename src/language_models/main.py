@@ -166,7 +166,7 @@ def evaluate(data_source):
         # for batch_idx, (data, targets) in enumerate(val_data):
         #     data, targets = data.to(device, non_blocking=True), targets.to(device, non_blocking=True)
 
-            if args.classmodel == 'Transformer' or args.classmodel == 'GPT2':
+            if args.classmodel == 'Transformer':
                 data = data.transpose(0, 1)
                 output = model(data)  # No hidden state needed
                 output_flat = output.view(-1, ntokens)
@@ -174,7 +174,11 @@ def evaluate(data_source):
                     nn.CrossEntropyLoss()(output_flat, targets).item()
                 )
                 del output, output_flat
-
+            elif args.classmodel == "GPT2":
+                data = data.transpose(0, 1)
+                output = model(input_ids=data, labels=targets)  # No hidden state needed
+                total_loss += output.loss.item()
+                del output
             else:
                 output, hidden = model(data, hidden)
                 output_flat = output.view(-1, ntokens)
@@ -223,12 +227,17 @@ def train():
             loss = criterion(output.view(-1, ntokens),
                                 targets)  # +reg*loss_reg
         # Around line where you have the other model conditions
-        elif args.classmodel == 'Transformer' or args.classmodel == 'GPT2':
+        elif args.classmodel == 'Transformer':
             data = data.transpose(0, 1)
             output = model(data)  # No hidden state needed
             loss = criterion(output.view(-1, ntokens), targets)
             del output
-
+        #a essayer !!!
+        elif args.classmodel == "GPT2":
+            data = data.transpose(0, 1)
+            output = model(input_ids=data, labels=targets)  # No hidden state needed
+            loss = output.loss
+            del output
         else :
             raise ValueError(f"Unknown model type: classmodel={args.classmodel}, model={args.model}")
         
