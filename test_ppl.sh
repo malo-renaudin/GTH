@@ -17,7 +17,7 @@
 #SBATCH --signal=SIGUSR1@90
 
 MODELS=("train_RNNModel_freq_4" "train_RNNModel_freq_6")
-TEST_FILES="base_data/test.txt test_orc.txt"
+TEST_FILES="base_data/test.txt test_orc2.txt"
 
 MODEL=${MODELS[$SLURM_ARRAY_TASK_ID]}
 
