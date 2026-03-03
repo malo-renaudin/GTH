@@ -4,30 +4,30 @@ import gc
 
 random.seed(100)
 
-proper_names = [
-    "John", "Mary", "Paul", "Sarah", "James", "Lisa", "Michael", "Jennifer",
-    "David", "Linda", "Robert", "Patricia", "William", "Elizabeth", "Richard", "Barbara",
-    "Ralph", "Amber", "Mason", "Danielle", "Roy", "Rose", "Eugene", "Brittany", "Louis", "Diana", "Philip",
-    "Abigail", "Bobby", "Jane", "Thomas", "Susan", "Charles", "Jessica", "Christopher", "Nancy", "Daniel", "Karen",
-    "Matthew", "Betty", "Anthony", "Helen", "Mark", "Sandra", "Donald", "Donna",
-    "Steven", "Carol", "Kenneth", "Ruth", "Joshua", "Sharon", "Kevin", "Michelle",
-    "Brian", "Laura", "George", "Emily", "Edward", "Kimberly", "Ronald", "Deborah",
-    "Timothy", "Dorothy", "Jason", "Amy", "Jeffrey", "Angela", "Ryan", "Ashley",
-    "Jacob", "Brenda", "Gary", "Emma", "Nicholas", "Olivia", "Eric", "Cynthia",
-    "Jonathan", "Marie", "Stephen", "Janet", "Larry", "Catherine", "Justin", "Frances",
-    "Scott", "Christine", "Brandon", "Samantha", "Benjamin", "Debra", "Samuel", "Rachel",
-    "Gregory", "Carolyn", "Frank", "Virginia", "Raymond", "Maria", "Alexander", "Heather",
-    "Patrick", "Diane", "Jack", "Julie", "Dennis", "Joyce", "Jerry", "Victoria",
-    "Tyler", "Kelly", "Aaron", "Christina", "Jose", "Joan", "Henry", "Evelyn",
-    "Adam", "Lauren", "Douglas", "Judith", "Nathan", "Megan", "Peter", "Cheryl",
-    "Zachary", "Andrea", "Kyle", "Hannah", "Noah", "Jacqueline", "Alan", "Martha",
-    "Carl", "Gloria", "Harold", "Teresa", "Roger", "Sara", "Arthur", "Janice",
-    "Lawrence", "Marie", "Sean", "Julia", "Christian", "Heather", "Albert", "Diane",
-    "Wayne", "Julie", "Ralph", "Joyce", "Roy", "Virginia", "Eugene", "Deborah",
-    "Louis", "Rachel", "Philip", "Carolyn", "Bobby", "Janet"
-]
+proper_names = ["John", "Mary"]
+    #"John", "Mary", "Paul", "Sarah", "James", "Lisa", "Michael", "Jennifer",
+    #"David", "Linda", "Robert", "Patricia", "William", "Elizabeth", "Richard", "Barbara",
+    #"Ralph", "Amber", "Mason", "Danielle", "Roy", "Rose", "Eugene", "Brittany", "Louis", "Diana", "Philip",
+    #"Abigail", "Bobby", "Jane", "Thomas", "Susan", "Charles", "Jessica", "Christopher", "Nancy", "Daniel", "Karen",
+    #"Matthew", "Betty", "Anthony", "Helen", "Mark", "Sandra", "Donald", "Donna",
+    #"Steven", "Carol", "Kenneth", "Ruth", "Joshua", "Sharon", "Kevin", "Michelle",
+    #"Brian", "Laura", "George", "Emily", "Edward", "Kimberly", "Ronald", "Deborah",
+    #"Timothy", "Dorothy", "Jason", "Amy", "Jeffrey", "Angela", "Ryan", "Ashley",
+    #"Jacob", "Brenda", "Gary", "Emma", "Nicholas", "Olivia", "Eric", "Cynthia",
+    #"Jonathan", "Marie", "Stephen", "Janet", "Larry", "Catherine", "Justin", "Frances",
+    #"Scott", "Christine", "Brandon", "Samantha", "Benjamin", "Debra", "Samuel", "Rachel",
+    #"Gregory", "Carolyn", "Frank", "Virginia", "Raymond", "Maria", "Alexander", "Heather",
+    #"Patrick", "Diane", "Jack", "Julie", "Dennis", "Joyce", "Jerry", "Victoria",
+    #"Tyler", "Kelly", "Aaron", "Christina", "Jose", "Joan", "Henry", "Evelyn",
+    #"Adam", "Lauren", "Douglas", "Judith", "Nathan", "Megan", "Peter", "Cheryl",
+    #"Zachary", "Andrea", "Kyle", "Hannah", "Noah", "Jacqueline", "Alan", "Martha",
+    #"Carl", "Gloria", "Harold", "Teresa", "Roger", "Sara", "Arthur", "Janice",
+    #"Lawrence", "Marie", "Sean", "Julia", "Christian", "Heather", "Albert", "Diane",
+    #"Wayne", "Julie", "Ralph", "Joyce", "Roy", "Virginia", "Eugene", "Deborah",
+    #"Louis", "Rachel", "Philip", "Carolyn", "Bobby", "Janet"
+#]
 
-agentive_nouns = [
+agentive_nouns = ["man", "woman"]
     "man", "woman", "boy", "girl", "dog", "cat", "person", "child",
     "baby", "adult", "teenager", "student", "teacher", "doctor", "nurse", "worker",
     "wife", "partner", "girlfriend", "boyfriend", "athlete", "player", "coach", "referee", "spectator",
