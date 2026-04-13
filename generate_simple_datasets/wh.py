@@ -51,13 +51,13 @@ adj2_opts = ["creative", "serious", "friendly", "quiet", "active"]#,
             #  "careful"]#, "proud", "gentle", "fair", "eager"]
 
 # Adverbs (Frequency - Placement is before the verb)
-adv1_opts = ["often", "always", "rarely", "secretly", "usually"]#, 
+# adv1_opts = ["often", "always", "rarely", "secretly", "usually"]#, 
             # "quickly"]#, "quietly", "clearly", "daily", "never"]
 
-
+adv1_opts = ["probably", "certainly", "possibly", "apparently", "maybe", "perhaps"]
 
 def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
-    v_base, v_ing = v_pair
+    v_base, _, v_ing = v_pair
     curr_n1 = pluralize_noun(n1) if n1_plur else n1
     curr_n2 = pluralize_noun(n2) if n2_plur else n2
     
@@ -77,9 +77,11 @@ def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
 
     for aux, v_fin in aux_list_n1:
         for a1, a2, ad1 in combos:
-            # Template 1: What (N1 is Subject)
-            q_what_n1 = f"What {aux} the {a1} {curr_n1} {ad1} {v_fin}?"
-            results.append(" ".join(q_what_n1.split()).capitalize())
+            # Template 1: What/Who/Whom variants
+            for wh_word in ["What", "Who", "Whom"]:
+                suffix = " with" if wh_word == "What" and v_base == "help" else ""
+                q_wh_n1 = f"{wh_word} {aux} the {a1} {curr_n1} {ad1} {v_fin}{suffix}?"
+                results.append(" ".join(q_wh_n1.split()).capitalize())
             
             # Template 2: Which (N1 is Subject, N2 is Object)
             q_which = f"Which {a2} {curr_n2} {aux} the {a1} {curr_n1} {ad1} {v_fin}?"
@@ -95,9 +97,11 @@ def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
 
     for aux, v_fin in aux_list_n2:
         for a1, a2, ad1 in combos:
-            # Template 1: What (N2 is Subject)
-            q_what_n2 = f"What {aux} the {a2} {curr_n2} {ad1} {v_fin}?"
-            results.append(" ".join(q_what_n2.split()).capitalize())
+            # Template 1: What/Who/Whom variants
+            for wh_word in ["What", "Who", "Whom"]:
+                suffix = " with" if wh_word == "What" and v_base == "help" else ""
+                q_wh_n2 = f"{wh_word} {aux} the {a2} {curr_n2} {ad1} {v_fin}{suffix}?"
+                results.append(" ".join(q_wh_n2.split()).capitalize())
             
     return results
 
@@ -115,9 +119,9 @@ def generate_declarative_variants(n1, n2, v_tuple, adj1, adj2, adv1, n1_plur, n2
     aux_prog = "are" if n1_plur else "is"
     
     tenses = [
-        v_past,                 # Past: "The doctor visited..."
-        v_pres,                 # Present: "The doctor visits..."
-        f"{aux_prog} {v_ing}"   # Progressive: "The doctor is visiting..."
+        ("past", v_past),      # Past: "The doctor visited..."
+        ("present", v_pres),   # Present: "The doctor visits..."
+        ("prog", v_ing)        # Progressive: "The doctor is visiting..."
     ]
     
     # 2. Modifier Combinations (2^3 = 8)
@@ -125,10 +129,17 @@ def generate_declarative_variants(n1, n2, v_tuple, adj1, adj2, adv1, n1_plur, n2
     combos = list(itertools.product(*mods.values()))
     
     declaratives = []
-    for verb_phrase in tenses:
+    for tense_type, verb_form in tenses:
         for a1, a2, ad1 in combos:
-            # Structure: The [adj1] N1 [adv1] [Verb] the [adj2] N2.
-            s = f"The {a1} {curr_n1} {ad1} {verb_phrase} the {a2} {curr_n2}."
+            if tense_type == "prog":
+                # Place adverb between auxiliary and participle: "is probably visiting"
+                verb_phrase = f"{aux_prog} {ad1} {verb_form}" if ad1 else f"{aux_prog} {verb_form}"
+            else:
+                # For simple past/present keep adverb before the lexical verb.
+                verb_phrase = f"{ad1} {verb_form}" if ad1 else verb_form
+
+            # Structure: The [adj1] N1 [Verb Phrase] the [adj2] N2.
+            s = f"The {a1} {curr_n1} {verb_phrase} the {a2} {curr_n2}."
             declaratives.append(" ".join(s.split()).capitalize())
             
     return declaratives
