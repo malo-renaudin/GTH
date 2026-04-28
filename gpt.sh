@@ -22,13 +22,18 @@ mkdir -p outputs/gpt
 
 # Jean Zay environment setup.
 module purge
-module load miniconda3/24.3.0
 module load cuda/11.8.0-r465
 
-source ~/.bashrc
+MINICONDA_ROOT="${MINICONDA_ROOT:-$WORK/miniconda3}"
+if [[ ! -f "${MINICONDA_ROOT}/etc/profile.d/conda.sh" ]]; then
+	echo "Miniconda not found at ${MINICONDA_ROOT}. Install it first on Jean Zay." >&2
+	exit 1
+fi
+
+source "${MINICONDA_ROOT}/etc/profile.d/conda.sh"
 
 # Allow overriding the environment at submission time:
-# sbatch --export=CONDA_ENV_NAME=myenv gpt.sh
+# sbatch --export=CONDA_ENV_NAME=myenv,MINICONDA_ROOT=/path/to/miniconda3 gpt.sh
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-litgpt_jz}"
 conda activate "${CONDA_ENV_NAME}"
 
