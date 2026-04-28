@@ -161,7 +161,7 @@ num_nodes: 1
 
 # Optional path to the tokenizer dir that was used for preprocessing the dataset. Only some data
 # module require this. (type: Optional[Path], default: null)
-tokenizer_dir: checkpoints/meta-llama/Llama-2-7b-hf
+tokenizer_dir: checkpoints/gpt2
 
 
 # The name of the logger to send metrics to. (type: Literal['wandb', 'tensorboard', 'csv'], default: tensorboard)
