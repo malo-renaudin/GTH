@@ -49,9 +49,8 @@ source "${MINICONDA_ROOT}/etc/profile.d/conda.sh"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-litgpt_jz}"
 conda activate "${CONDA_ENV_NAME}"
 
-# Use the submission directory by default instead of a hardcoded path.
-PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
-export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+# Do not prepend the project root to PYTHONPATH here.
+# This repo contains litgpt.py, which would shadow the installed litgpt package.
 
 echo "Host: $(hostname)"
 echo "GPU(s): ${CUDA_VISIBLE_DEVICES:-not-set}"
