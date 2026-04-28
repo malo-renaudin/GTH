@@ -51,7 +51,7 @@ resume: false
 data:
   class_path: litgpt.data.TextFiles
   init_args:
-    data_path: data/english_data/train_baseline_augmented.txt
+    data_path: data/train_baseline_augmented.txt
     seed: 2357
 
 
