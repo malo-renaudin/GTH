@@ -1,0 +1,786 @@
+::T<= +q Q
+what::d[in] -acc -wh
+who::d[an] -acc -wh
+which::N[in]= d[in] -acc -wh
+which::N[an]= d[an] -acc -wh
+whom::d[an] -acc -wh
+::T<= +q +wh Q
+::q -q
+does::V= q= +subj3 T
+do::V= q= +subj2 T
+do::V= q= +subj1 T
+did::V= q= +subj3 T
+did::V= q= +subj2 T
+did::V= q= +subj1 T
+::q -q
+to::theme[an]= p
+talk::p= v
+see::d[an]= +acc v
+see::d[in]= +acc v
+devour::d[in]= +acc v
+want::d[in]= +acc v
+run::v
+you::d[an] -subj2
+you::d[an] -acc
+I::d[an] -subj1
+me::d[an] -acc
+he::d[an] -subj3
+him::d[an] -acc
+she::d[an] -subj3
+her::d[an] -acc
+::d[an]= +theme theme[an]
+that::C= +r +rel[in] d[in] -acc
+that::C= +r +rel[in] d[in] -subj3
+who::C= +r +rel[an] d[an] -acc
+who::C= +r +rel[an] d[an] -subj3
+::=>v =d[an] V
+man::N[an]
+woman::N[an]
+boy::N[an]
+girl::N[an]
+dog::N[an]
+cat::N[an]
+person::N[an]
+child::N[an]
+baby::N[an]
+adult::N[an]
+teenager::N[an]
+student::N[an]
+teacher::N[an]
+doctor::N[an]
+nurse::N[an]
+worker::N[an]
+wife::N[an]
+partner::N[an]
+girlfriend::N[an]
+boyfriend::N[an]
+athlete::N[an]
+player::N[an]
+coach::N[an]
+referee::N[an]
+spectator::N[an]
+fan::N[an]
+tourist::N[an]
+traveler::N[an]
+passenger::N[an]
+pedestrian::N[an]
+cyclist::N[an]
+runner::N[an]
+swimmer::N[an]
+climber::N[an]
+hiker::N[an]
+lawyer::N[an]
+judge::N[an]
+police_officer::N[an]
+firefighter::N[an]
+paramedic::N[an]
+pilot::N[an]
+captain::N[an]
+sailor::N[an]
+soldier::N[an]
+officer::N[an]
+general::N[an]
+sergeant::N[an]
+detective::N[an]
+investigator::N[an]
+scientist::N[an]
+researcher::N[an]
+professor::N[an]
+principal::N[an]
+librarian::N[an]
+counselor::N[an]
+therapist::N[an]
+psychologist::N[an]
+psychiatrist::N[an]
+dentist::N[an]
+surgeon::N[an]
+physician::N[an]
+veterinarian::N[an]
+pharmacist::N[an]
+optometrist::N[an]
+chiropractor::N[an]
+radiologist::N[an]
+cardiologist::N[an]
+engineer::N[an]
+architect::N[an]
+designer::N[an]
+developer::N[an]
+programmer::N[an]
+analyst::N[an]
+consultant::N[an]
+manager::N[an]
+director::N[an]
+executive::N[an]
+president::N[an]
+supervisor::N[an]
+coordinator::N[an]
+administrator::N[an]
+secretary::N[an]
+assistant::N[an]
+clerk::N[an]
+cashier::N[an]
+salesperson::N[an]
+merchant::N[an]
+vendor::N[an]
+retailer::N[an]
+wholesaler::N[an]
+distributor::N[an]
+manufacturer::N[an]
+producer::N[an]
+creator::N[an]
+inventor::N[an]
+innovator::N[an]
+entrepreneur::N[an]
+founder::N[an]
+owner::N[an]
+chef::N[an]
+cook::N[an]
+baker::N[an]
+waiter::N[an]
+waitress::N[an]
+server::N[an]
+bartender::N[an]
+barista::N[an]
+mechanic::N[an]
+technician::N[an]
+electrician::N[an]
+plumber::N[an]
+carpenter::N[an]
+painter::N[an]
+roofer::N[an]
+mason::N[an]
+gardener::N[an]
+landscaper::N[an]
+farmer::N[an]
+rancher::N[an]
+fisherman::N[an]
+hunter::N[an]
+forester::N[an]
+miner::N[an]
+driver::N[an]
+chauffeur::N[an]
+taxi_driver::N[an]
+bus_driver::N[an]
+truck_driver::N[an]
+delivery_person::N[an]
+courier::N[an]
+messenger::N[an]
+writer::N[an]
+author::N[an]
+journalist::N[an]
+reporter::N[an]
+editor::N[an]
+publisher::N[an]
+blogger::N[an]
+columnist::N[an]
+artist::N[an]
+painter::N[an]
+sculptor::N[an]
+musician::N[an]
+singer::N[an]
+dancer::N[an]
+actor::N[an]
+actress::N[an]
+photographer::N[an]
+filmmaker::N[an]
+director::N[an]
+producer::N[an]
+screenwriter::N[an]
+composer::N[an]
+conductor::N[an]
+performer::N[an]
+athlete::N[an]
+footballer::N[an]
+basketball_player::N[an]
+tennis_player::N[an]
+golfer::N[an]
+boxer::N[an]
+wrestler::N[an]
+gymnast::N[an]
+neighbor::N[an]
+friend::N[an]
+colleague::N[an]
+classmate::N[an]
+roommate::N[an]
+housemate::N[an]
+tenant::N[an]
+landlord::N[an]
+customer::N[an]
+client::N[an]
+patron::N[an]
+guest::N[an]
+visitor::N[an]
+stranger::N[an]
+acquaintance::N[an]
+companion::N[an]
+leader::N[an]
+follower::N[an]
+member::N[an]
+participant::N[an]
+volunteer::N[an]
+activist::N[an]
+supporter::N[an]
+opponent::N[an]
+expert::N[an]
+specialist::N[an]
+professional::N[an]
+amateur::N[an]
+beginner::N[an]
+veteran::N[an]
+rookie::N[an]
+trainee::N[an]
+cake::N[in]
+apple::N[in]
+cherry::N[in]
+banana::N[in]
+orange::N[in]
+grape::N[in]
+strawberry::N[in]
+blueberry::N[in]
+raspberry::N[in]
+peach::N[in]
+pear::N[in]
+pineapple::N[in]
+mango::N[in]
+kiwi::N[in]
+lemon::N[in]
+lime::N[in]
+coconut::N[in]
+avocado::N[in]
+tomato::N[in]
+bread::N[in]
+sandwich::N[in]
+pizza::N[in]
+pasta::N[in]
+rice::N[in]
+noodles::N[in]
+soup::N[in]
+salad::N[in]
+cookie::N[in]
+pie::N[in]
+donut::N[in]
+muffin::N[in]
+cupcake::N[in]
+ice_cream::N[in]
+chocolate::N[in]
+candy::N[in]
+cheese::N[in]
+milk::N[in]
+yogurt::N[in]
+butter::N[in]
+eggs::N[in]
+meat::N[in]
+chicken::N[in]
+beef::N[in]
+table::N[in]
+chair::N[in]
+sofa::N[in]
+bed::N[in]
+lamp::N[in]
+mirror::N[in]
+clock::N[in]
+television::N[in]
+computer::N[in]
+phone::N[in]
+tablet::N[in]
+camera::N[in]
+book::N[in]
+magazine::N[in]
+newspaper::N[in]
+pen::N[in]
+pencil::N[in]
+paper::N[in]
+notebook::N[in]
+folder::N[in]
+envelope::N[in]
+stamp::N[in]
+key::N[in]
+wallet::N[in]
+purse::N[in]
+bag::N[in]
+backpack::N[in]
+suitcase::N[in]
+umbrella::N[in]
+hat::N[in]
+coat::N[in]
+jacket::N[in]
+shirt::N[in]
+pants::N[in]
+dress::N[in]
+shoes::N[in]
+socks::N[in]
+gloves::N[in]
+scarf::N[in]
+belt::N[in]
+hammer::N[in]
+screwdriver::N[in]
+wrench::N[in]
+drill::N[in]
+saw::N[in]
+knife::N[in]
+spoon::N[in]
+fork::N[in]
+plate::N[in]
+bowl::N[in]
+cup::N[in]
+glass::N[in]
+bottle::N[in]
+jar::N[in]
+can::N[in]
+box::N[in]
+car::N[in]
+bicycle::N[in]
+motorcycle::N[in]
+bus::N[in]
+train::N[in]
+airplane::N[in]
+boat::N[in]
+ship::N[in]
+ball::N[in]
+toy::N[in]
+game::N[in]
+puzzle::N[in]
+doll::N[in]
+robot::N[in]
+kite::N[in]
+balloon::N[in]
+tree::N[in]
+flower::N[in]
+leaf::N[in]
+branch::N[in]
+rock::N[in]
+stone::N[in]
+shell::N[in]
+feather::N[in]
+mountain::N[in]
+hill::N[in]
+river::N[in]
+lake::N[in]
+ocean::N[in]
+beach::N[in]
+forest::N[in]
+field::N[in]
+desk::N[in]
+keyboard::N[in]
+mouse::N[in]
+monitor::N[in]
+printer::N[in]
+calculator::N[in]
+stapler::N[in]
+ruler::N[in]
+eraser::N[in]
+marker::N[in]
+crayon::N[in]
+paintbrush::N[in]
+canvas::N[in]
+easel::N[in]
+sculpture::N[in]
+vase::N[in]
+guitar::N[in]
+piano::N[in]
+violin::N[in]
+drum::N[in]
+flute::N[in]
+trumpet::N[in]
+saxophone::N[in]
+clarinet::N[in]
+bat::N[in]
+racket::N[in]
+club::N[in]
+helmet::N[in]
+glove::N[in]
+uniform::N[in]
+trophy::N[in]
+medal::N[in]
+John::d[an] -subj3
+John::d[an] -acc
+Mary::d[an] -subj3
+Mary::d[an] -acc
+Paul::d[an] -subj3
+Paul::d[an] -acc
+Sarah::d[an] -subj3
+Sarah::d[an] -acc
+James::d[an] -subj3
+James::d[an] -acc
+Lisa::d[an] -subj3
+Lisa::d[an] -acc
+Michael::d[an] -subj3
+Michael::d[an] -acc
+Jennifer::d[an] -subj3
+Jennifer::d[an] -acc
+David::d[an] -subj3
+David::d[an] -acc
+Linda::d[an] -subj3
+Linda::d[an] -acc
+Robert::d[an] -subj3
+Robert::d[an] -acc
+Patricia::d[an] -subj3
+Patricia::d[an] -acc
+William::d[an] -subj3
+William::d[an] -acc
+Elizabeth::d[an] -subj3
+Elizabeth::d[an] -acc
+Richard::d[an] -subj3
+Richard::d[an] -acc
+Barbara::d[an] -subj3
+Barbara::d[an] -acc
+Ralph::d[an] -subj3
+Ralph::d[an] -acc
+Amber::d[an] -subj3
+Amber::d[an] -acc
+Mason::d[an] -subj3
+Mason::d[an] -acc
+Danielle::d[an] -subj3
+Danielle::d[an] -acc
+Roy::d[an] -subj3
+Roy::d[an] -acc
+Rose::d[an] -subj3
+Rose::d[an] -acc
+Eugene::d[an] -subj3
+Eugene::d[an] -acc
+Brittany::d[an] -subj3
+Brittany::d[an] -acc
+Louis::d[an] -subj3
+Louis::d[an] -acc
+Diana::d[an] -subj3
+Diana::d[an] -acc
+Philip::d[an] -subj3
+Philip::d[an] -acc
+Abigail::d[an] -subj3
+Abigail::d[an] -acc
+Bobby::d[an] -subj3
+Bobby::d[an] -acc
+Jane::d[an] -subj3
+Jane::d[an] -acc
+Thomas::d[an] -subj3
+Thomas::d[an] -acc
+Susan::d[an] -subj3
+Susan::d[an] -acc
+Charles::d[an] -subj3
+Charles::d[an] -acc
+Jessica::d[an] -subj3
+Jessica::d[an] -acc
+Christopher::d[an] -subj3
+Christopher::d[an] -acc
+Nancy::d[an] -subj3
+Nancy::d[an] -acc
+Daniel::d[an] -subj3
+Daniel::d[an] -acc
+Karen::d[an] -subj3
+Karen::d[an] -acc
+Matthew::d[an] -subj3
+Matthew::d[an] -acc
+Betty::d[an] -subj3
+Betty::d[an] -acc
+Anthony::d[an] -subj3
+Anthony::d[an] -acc
+Helen::d[an] -subj3
+Helen::d[an] -acc
+Mark::d[an] -subj3
+Mark::d[an] -acc
+Sandra::d[an] -subj3
+Sandra::d[an] -acc
+Donald::d[an] -subj3
+Donald::d[an] -acc
+Donna::d[an] -subj3
+Donna::d[an] -acc
+Steven::d[an] -subj3
+Steven::d[an] -acc
+Carol::d[an] -subj3
+Carol::d[an] -acc
+Kenneth::d[an] -subj3
+Kenneth::d[an] -acc
+Ruth::d[an] -subj3
+Ruth::d[an] -acc
+Joshua::d[an] -subj3
+Joshua::d[an] -acc
+Sharon::d[an] -subj3
+Sharon::d[an] -acc
+Kevin::d[an] -subj3
+Kevin::d[an] -acc
+Michelle::d[an] -subj3
+Michelle::d[an] -acc
+Brian::d[an] -subj3
+Brian::d[an] -acc
+Laura::d[an] -subj3
+Laura::d[an] -acc
+George::d[an] -subj3
+George::d[an] -acc
+Emily::d[an] -subj3
+Emily::d[an] -acc
+Edward::d[an] -subj3
+Edward::d[an] -acc
+Kimberly::d[an] -subj3
+Kimberly::d[an] -acc
+Ronald::d[an] -subj3
+Ronald::d[an] -acc
+Deborah::d[an] -subj3
+Deborah::d[an] -acc
+Timothy::d[an] -subj3
+Timothy::d[an] -acc
+Dorothy::d[an] -subj3
+Dorothy::d[an] -acc
+Jason::d[an] -subj3
+Jason::d[an] -acc
+Amy::d[an] -subj3
+Amy::d[an] -acc
+Jeffrey::d[an] -subj3
+Jeffrey::d[an] -acc
+Angela::d[an] -subj3
+Angela::d[an] -acc
+Ryan::d[an] -subj3
+Ryan::d[an] -acc
+Ashley::d[an] -subj3
+Ashley::d[an] -acc
+Jacob::d[an] -subj3
+Jacob::d[an] -acc
+Brenda::d[an] -subj3
+Brenda::d[an] -acc
+Gary::d[an] -subj3
+Gary::d[an] -acc
+Emma::d[an] -subj3
+Emma::d[an] -acc
+Nicholas::d[an] -subj3
+Nicholas::d[an] -acc
+Olivia::d[an] -subj3
+Olivia::d[an] -acc
+Eric::d[an] -subj3
+Eric::d[an] -acc
+Cynthia::d[an] -subj3
+Cynthia::d[an] -acc
+Jonathan::d[an] -subj3
+Jonathan::d[an] -acc
+Marie::d[an] -subj3
+Marie::d[an] -acc
+Stephen::d[an] -subj3
+Stephen::d[an] -acc
+Janet::d[an] -subj3
+Janet::d[an] -acc
+Larry::d[an] -subj3
+Larry::d[an] -acc
+Catherine::d[an] -subj3
+Catherine::d[an] -acc
+Justin::d[an] -subj3
+Justin::d[an] -acc
+Frances::d[an] -subj3
+Frances::d[an] -acc
+Scott::d[an] -subj3
+Scott::d[an] -acc
+Christine::d[an] -subj3
+Christine::d[an] -acc
+Brandon::d[an] -subj3
+Brandon::d[an] -acc
+Samantha::d[an] -subj3
+Samantha::d[an] -acc
+Benjamin::d[an] -subj3
+Benjamin::d[an] -acc
+Debra::d[an] -subj3
+Debra::d[an] -acc
+Samuel::d[an] -subj3
+Samuel::d[an] -acc
+Rachel::d[an] -subj3
+Rachel::d[an] -acc
+Gregory::d[an] -subj3
+Gregory::d[an] -acc
+Carolyn::d[an] -subj3
+Carolyn::d[an] -acc
+Frank::d[an] -subj3
+Frank::d[an] -acc
+Virginia::d[an] -subj3
+Virginia::d[an] -acc
+Raymond::d[an] -subj3
+Raymond::d[an] -acc
+Maria::d[an] -subj3
+Maria::d[an] -acc
+Alexander::d[an] -subj3
+Alexander::d[an] -acc
+Heather::d[an] -subj3
+Heather::d[an] -acc
+Patrick::d[an] -subj3
+Patrick::d[an] -acc
+Diane::d[an] -subj3
+Diane::d[an] -acc
+Jack::d[an] -subj3
+Jack::d[an] -acc
+Julie::d[an] -subj3
+Julie::d[an] -acc
+Dennis::d[an] -subj3
+Dennis::d[an] -acc
+Joyce::d[an] -subj3
+Joyce::d[an] -acc
+Jerry::d[an] -subj3
+Jerry::d[an] -acc
+Victoria::d[an] -subj3
+Victoria::d[an] -acc
+Tyler::d[an] -subj3
+Tyler::d[an] -acc
+Kelly::d[an] -subj3
+Kelly::d[an] -acc
+Aaron::d[an] -subj3
+Aaron::d[an] -acc
+Christina::d[an] -subj3
+Christina::d[an] -acc
+Jose::d[an] -subj3
+Jose::d[an] -acc
+Joan::d[an] -subj3
+Joan::d[an] -acc
+Henry::d[an] -subj3
+Henry::d[an] -acc
+Evelyn::d[an] -subj3
+Evelyn::d[an] -acc
+Adam::d[an] -subj3
+Adam::d[an] -acc
+Lauren::d[an] -subj3
+Lauren::d[an] -acc
+Douglas::d[an] -subj3
+Douglas::d[an] -acc
+Judith::d[an] -subj3
+Judith::d[an] -acc
+Nathan::d[an] -subj3
+Nathan::d[an] -acc
+Megan::d[an] -subj3
+Megan::d[an] -acc
+Peter::d[an] -subj3
+Peter::d[an] -acc
+Cheryl::d[an] -subj3
+Cheryl::d[an] -acc
+Zachary::d[an] -subj3
+Zachary::d[an] -acc
+Andrea::d[an] -subj3
+Andrea::d[an] -acc
+Kyle::d[an] -subj3
+Kyle::d[an] -acc
+Hannah::d[an] -subj3
+Hannah::d[an] -acc
+Noah::d[an] -subj3
+Noah::d[an] -acc
+Jacqueline::d[an] -subj3
+Jacqueline::d[an] -acc
+Alan::d[an] -subj3
+Alan::d[an] -acc
+Martha::d[an] -subj3
+Martha::d[an] -acc
+Carl::d[an] -subj3
+Carl::d[an] -acc
+Gloria::d[an] -subj3
+Gloria::d[an] -acc
+Harold::d[an] -subj3
+Harold::d[an] -acc
+Teresa::d[an] -subj3
+Teresa::d[an] -acc
+Roger::d[an] -subj3
+Roger::d[an] -acc
+Sara::d[an] -subj3
+Sara::d[an] -acc
+Arthur::d[an] -subj3
+Arthur::d[an] -acc
+Janice::d[an] -subj3
+Janice::d[an] -acc
+Lawrence::d[an] -subj3
+Lawrence::d[an] -acc
+Marie::d[an] -subj3
+Marie::d[an] -acc
+Sean::d[an] -subj3
+Sean::d[an] -acc
+Julia::d[an] -subj3
+Julia::d[an] -acc
+Christian::d[an] -subj3
+Christian::d[an] -acc
+Heather::d[an] -subj3
+Heather::d[an] -acc
+Albert::d[an] -subj3
+Albert::d[an] -acc
+Diane::d[an] -subj3
+Diane::d[an] -acc
+Wayne::d[an] -subj3
+Wayne::d[an] -acc
+Julie::d[an] -subj3
+Julie::d[an] -acc
+Ralph::d[an] -subj3
+Ralph::d[an] -acc
+Joyce::d[an] -subj3
+Joyce::d[an] -acc
+Roy::d[an] -subj3
+Roy::d[an] -acc
+Virginia::d[an] -subj3
+Virginia::d[an] -acc
+Eugene::d[an] -subj3
+Eugene::d[an] -acc
+Deborah::d[an] -subj3
+Deborah::d[an] -acc
+Louis::d[an] -subj3
+Louis::d[an] -acc
+Rachel::d[an] -subj3
+Rachel::d[an] -acc
+Philip::d[an] -subj3
+Philip::d[an] -acc
+Carolyn::d[an] -subj3
+Carolyn::d[an] -acc
+Bobby::d[an] -subj3
+Bobby::d[an] -acc
+Janet::d[an] -subj3
+Janet::d[an] -acc
+the::N[in]= d[in] -theme
+the::N[in]= d[in] -subj3
+the::N[in]= d[in] -acc
+the[OBJ_REL]::N[in]= d[in] -acc -rel[in]
+the::N[an]= d[an] -theme
+the::N[an]= d[an] -subj3
+the::N[an]= d[an] -acc
+the[OBJ_REL]::N[an]= d[an] -acc -rel[an]
+can::V= +subj3 T
+can::V= +subj2 T
+can::V= +subj1 T
+can::V= q= +subj3 T
+can::V= q= +subj2 T
+can::V= q= +subj1 T
+can::V= r= +subj3 T
+can::V= r= +subj2 T
+can::V= r= +subj1 T
+would::V= +subj3 T
+would::V= +subj2 T
+would::V= +subj1 T
+would::V= q= +subj3 T
+would::V= q= +subj2 T
+would::V= q= +subj1 T
+would::V= r= +subj3 T
+would::V= r= +subj2 T
+would::V= r= +subj1 T
+may::V= +subj3 T
+may::V= +subj2 T
+may::V= +subj1 T
+may::V= q= +subj3 T
+may::V= q= +subj2 T
+may::V= q= +subj1 T
+may::V= r= +subj3 T
+may::V= r= +subj2 T
+may::V= r= +subj1 T
+should::V= +subj3 T
+should::V= +subj2 T
+should::V= +subj1 T
+should::V= q= +subj3 T
+should::V= q= +subj2 T
+should::V= q= +subj1 T
+should::V= r= +subj3 T
+should::V= r= +subj2 T
+should::V= r= +subj1 T
+am::prog= +subj1 T
+are::prog= +subj2 T
+is::prog= +subj3 T
+am::prog= q= +subj1 T
+are::prog= q= +subj2 T
+is::prog= q= +subj3 T
+am::prog= r= +subj1 T
+are::prog= r= +subj2 T
+is::prog= r= +subj3 T
+ing::=>V prog
+PAST::=>V +subj3 t
+PAST::=>V +subj2 t
+PAST::=>V +subj1 t
+::T= C
+::t= T
+::t= r= T
+::r -r
+3PRES::=>V +subj3 t
+2PRES::=>V +subj2 t
+1PRES::=>V +subj1 t

@@ -1,0 +1,105 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{parskip}
+\usepackage{microtype}
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\small, backgroundcolor=\color{gray!10}, frame=single}
+\usepackage{xcolor}
+
+\title{\textbf{Sentence Dataset Generation}\\
+\large \texttt{generate\_simple\_datasets/}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Overview}
+
+Two scripts generate controlled synthetic corpora for studying syntactic processing.
+Each script accepts two arguments:
+
+\begin{lstlisting}
+--output_file   Path to the output .txt file
+--structures    Integer selecting the structure type (see below)
+\end{lstlisting}
+
+All output files are deduplicated (order preserved).
+
+\section*{\texttt{orc.py} --- Object Relative Clauses}
+
+\subsection*{Vocabulary}
+
+\begin{tabular}{lp{10cm}}
+\toprule
+\textbf{Set} & \textbf{Items} \\
+\midrule
+$N_1$ (head noun) & boy, student, doctor, artist, athlete \\
+$N_2$ (RC noun)   & girl, child, pilot, scientist, engineer \\
+Verbs $(v_s, v_p)$ & visits/visit, helps/help, avoids/avoid, follows/follow, greets/greet \\
+$\text{Adj}_1$    & big, tall, young, strong, kind \\
+$\text{Adj}_2$    & beautiful, smart, brave, famous, honest \\
+$\text{Adv}$      & secretly, always, often, rarely \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Structures (\texttt{--structures})}
+
+\begin{description}[leftmargin=2em]
+  \item[1 --- ORC] \textit{The [\textsc{adj1}] $N_1$ [that/who/\(\emptyset\)] the [\textsc{adj2}] $N_2$ [\textsc{adv}] $V$ \textbf{+ continuation}.}
+
+  All modifier slots ($\text{Adj}_1$, $\text{Adj}_2$, $\text{Adv}$, relativizer) are independently present or absent ($2^4$ combinations). Both $N_1$ and $N_2$ independently vary in number (singular/plural), giving $4$ number scenarios per lexical combination. Verb agreement follows $N_2$ (the RC subject). A random continuation (e.g.\ \textit{is eating an apple}) is appended, agreeing with $N_1$.
+
+  \item[2 --- SVO] \textit{The [\textsc{adj2}] $N_2$ [\textsc{adv}] $V$ the [\textsc{adj1}] $N_1$.}
+
+  Same modifier and number combinatorics as above; no continuation appended.
+\end{description}
+
+\subsection*{Corpus size (upper bound)}
+
+\[
+  |N_1| \times |N_2| \times |V| \times |\text{Adj}_1| \times |\text{Adj}_2| \times |\text{Adv}|
+  \times 2^4 \text{ (modifiers)} \times 4 \text{ (number)} = 5^2 \times 5^3 \times 16 \times 4
+\]
+
+Duplicates (arising from empty modifier slots collapsing distinct combinations) are removed before writing.
+
+\section*{\texttt{wh.py} --- WH-Questions and Declaratives}
+
+\subsection*{Vocabulary}
+
+\begin{tabular}{lp{9cm}}
+\toprule
+\textbf{Set} & \textbf{Items} \\
+\midrule
+$N_1$ & student, doctor, pilot, officer, athlete, artist \\
+$N_2$ & child, girl, boy, patient, client, tourist \\
+Verbs $(v_\text{base}, v_\text{past}, v_\text{-ing})$ & visit, help, greet, follow, avoid, call, observe \\
+$\text{Adj}_1$ & young, tall, smart, brave, kind, famous \\
+$\text{Adj}_2$ & creative, serious, friendly, quiet, active \\
+$\text{Adv}$   & probably, certainly, possibly, apparently, maybe, perhaps \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Structures (\texttt{--structures})}
+
+\begin{description}[leftmargin=2em]
+  \item[1 --- WH-Questions] For each lexical/number combination, questions are generated in two cases:
+
+  \begin{enumerate}
+    \item \textbf{Case A} ($N_1$ is subject): \textit{WH \textsc{aux} the [\textsc{adj1}] $N_1$ [\textsc{adv}] $V$?} \quad and \quad \textit{Which [\textsc{adj2}] $N_2$ \textsc{aux} the [\textsc{adj1}] $N_1$ [\textsc{adv}] $V$?}
+    \item \textbf{Case B} ($N_2$ is subject, skipped for animate-only verbs): \textit{WH \textsc{aux} the [\textsc{adj2}] $N_2$ [\textsc{adv}] $V$?}
+  \end{enumerate}
+
+  Three auxiliary paradigms are used per case: past (\textit{did}), present (\textit{does/do}), progressive (\textit{is/are}). Animate-only verbs (\texttt{greet}, \texttt{call}, \texttt{help}) restrict the WH-word set to \{Who, Whom\}; others also allow \textit{What}.
+
+  \item[2 --- Declaratives] \textit{The [\textsc{adj1}] $N_1$ $V_\text{tense}$ the [\textsc{adj2}] $N_2$.}
+
+  Three tenses: past, present simple (with agreement), progressive (adverb placed between auxiliary and participle). Modifier slots ($\text{Adj}_1$, $\text{Adj}_2$, $\text{Adv}$) are independently present or absent ($2^3$ combinations).
+\end{description}
+
+Both structures iterate over all 4 number scenarios ($N_1$ singular/plural $\times$ $N_2$ singular/plural). Sentences are deduplicated on the fly via a \texttt{seen} set.
+
+\end{document}

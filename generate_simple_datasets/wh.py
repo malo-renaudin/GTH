@@ -56,6 +56,15 @@ adj2_opts = ["creative", "serious", "friendly", "quiet", "active"]#,
 
 adv1_opts = ["probably", "certainly", "possibly", "apparently", "maybe", "perhaps"]
 
+# Verbs that require animate objects (no "What" questions)
+ANIMATE_ONLY_VERBS = {"greet", "call", "help"}
+
+def get_wh_words_for_verb(v_base):
+    """Return list of wh-words appropriate for the given verb."""
+    if v_base in ANIMATE_ONLY_VERBS:
+        return ["Who", "Whom"]
+    return ["What", "Who", "Whom"]
+
 def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
     v_base, _, v_ing = v_pair
     curr_n1 = pluralize_noun(n1) if n1_plur else n1
@@ -66,8 +75,11 @@ def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
     combos = list(itertools.product(*mods.values()))
     
     results = []
+    
+    # Determine which wh-words are appropriate for this verb
+    wh_words = get_wh_words_for_verb(v_base)
 
-    # Case A: N1 is the Subject (What/Which)
+    # Case A: N1 is the Subject (What/Who/Whom or Who/Whom)
     # Aux agrees with N1
     aux_list_n1 = [
         ("did", v_base), 
@@ -77,31 +89,31 @@ def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
 
     for aux, v_fin in aux_list_n1:
         for a1, a2, ad1 in combos:
-            # Template 1: What/Who/Whom variants
-            for wh_word in ["What", "Who", "Whom"]:
-                suffix = " with" if wh_word == "What" and v_base == "help" else ""
-                q_wh_n1 = f"{wh_word} {aux} the {a1} {curr_n1} {ad1} {v_fin}{suffix}?"
+            # Template 1: What/Who/Whom variants (filtered by verb requirements)
+            for wh_word in wh_words:
+                q_wh_n1 = f"{wh_word} {aux} the {a1} {curr_n1} {ad1} {v_fin}?"
                 results.append(" ".join(q_wh_n1.split()).capitalize())
             
             # Template 2: Which (N1 is Subject, N2 is Object)
             q_which = f"Which {a2} {curr_n2} {aux} the {a1} {curr_n1} {ad1} {v_fin}?"
             results.append(" ".join(q_which.split()).capitalize())
 
-    # Case B: N2 is the Subject (What only)
-    # Aux agrees with N2
-    aux_list_n2 = [
-        ("did", v_base), 
-        ("does" if not n2_plur else "do", v_base),
-        ("is" if not n2_plur else "are", v_ing)
-    ]
+    # Case B: N2 is the Subject - Skip for animate-only verbs (they need an object)
+    # Only generate for verbs that can appear with N2 as subject
+    if v_base not in ANIMATE_ONLY_VERBS:
+        # Aux agrees with N2
+        aux_list_n2 = [
+            ("did", v_base), 
+            ("does" if not n2_plur else "do", v_base),
+            ("is" if not n2_plur else "are", v_ing)
+        ]
 
-    for aux, v_fin in aux_list_n2:
-        for a1, a2, ad1 in combos:
-            # Template 1: What/Who/Whom variants
-            for wh_word in ["What", "Who", "Whom"]:
-                suffix = " with" if wh_word == "What" and v_base == "help" else ""
-                q_wh_n2 = f"{wh_word} {aux} the {a2} {curr_n2} {ad1} {v_fin}{suffix}?"
-                results.append(" ".join(q_wh_n2.split()).capitalize())
+        for aux, v_fin in aux_list_n2:
+            for a1, a2, ad1 in combos:
+                # Template 1: What/Who/Whom variants
+                for wh_word in wh_words:
+                    q_wh_n2 = f"{wh_word} {aux} the {a2} {curr_n2} {ad1} {v_fin}?"
+                    results.append(" ".join(q_wh_n2.split()).capitalize())
             
     return results
 
@@ -151,6 +163,7 @@ def pluralize_noun(noun):
 def generate_final_corpus_to_file(struct, filename):
     word_products = itertools.product(n1_opts, n2_opts, v_opts, adj1_opts, adj2_opts, adv1_opts)
     
+    seen = set()
     with open(filename, "w") as f:
         for n1, n2, v_pair, adj1, adj2, adv1 in word_products:
             # Generate all 4 number scenarios
@@ -158,16 +171,17 @@ def generate_final_corpus_to_file(struct, filename):
                 if struct == 1:
                     # Generate all WH variants for this combination
                     wh_variants = generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_p, n2_p)
-                    # with open(output_file, "w") as f:
                     for sentence in wh_variants:
-                        f.write(sentence + "\n")    
+                        if sentence not in seen:
+                            seen.add(sentence)
+                            f.write(sentence + "\n")    
                 elif struct == 2:
                     # Fetch all grammatical variants (What/Which/Tenses/Modifiers)
                     batch = generate_declarative_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_p, n2_p)
-                    # Write to file immediately to save RAM
-                    # with open(output_file, "w") as f:
                     for sentence in batch:
-                        f.write(sentence + "\n")
+                        if sentence not in seen:
+                            seen.add(sentence)
+                            f.write(sentence + "\n")
 
 if __name__== "__main__":
     generate_final_corpus_to_file(struct, output_file)

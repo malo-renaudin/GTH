@@ -21,3 +21,7 @@ tests/datasets
 *.csv
 *.pyc
 *.png
+*.err
+*.out
+*.npz
+events.out.tfevents*

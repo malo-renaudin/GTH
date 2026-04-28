@@ -11,6 +11,21 @@ struct = args.structures
 output_file = args.output_file
 
 print(f"Generating sentences for structures: {struct}")
+
+# Verb-adverb compatibility rules
+# Some verbs don't work well with certain adverbs
+ADVERB_RESTRICTIONS = {
+    "follows": {"secretly"},  # Only frequency adverbs work well
+    "greets": {"secretly"},# Can't greet secretly
+
+}
+
+def is_valid_verb_adverb_combo(verb, adverb):
+    """Check if verb + adverb combination is natural."""
+    if verb in ADVERB_RESTRICTIONS:
+        return adverb not in ADVERB_RESTRICTIONS[verb]
+    return True
+
 def generate_sentence_variants(structure, n1, n2, v1_sing, v1_plur, adj1, adj2, adv1, n1_is_plural=False, n2_is_plural=False):
     current_n1 = pluralize_noun(n1) if n1_is_plural else n1 
     current_n2 = pluralize_noun(n2) if n2_is_plural else n2
@@ -31,6 +46,11 @@ def generate_sentence_variants(structure, n1, n2, v1_sing, v1_plur, adj1, adj2, 
 
     for combo in combinations:
         d = dict(zip(keys, combo))
+        
+        # Skip invalid verb-adverb combinations
+        if not is_valid_verb_adverb_combo(v1_sing, d['adv1']):
+            continue
+            
         if structure == 1:
             s_core = f"The {d['adj1']} {current_n1} {d['rel']} the {d['adj2']} {current_n2} {d['adv1']} {current_v1}"
         elif structure == 2:
@@ -82,7 +102,7 @@ n2_opts = ["girl", "child", "pilot", "scientist", "engineer"] # 'child' requires
 v_opts = [("visits", "visit"), ("helps", "help"), ("avoids", "avoid"), ("follows", "follow"), ("greets", "greet")]
 adj1_opts = ["big", "tall", "young", "strong", "kind"]
 adj2_opts = ["beautiful", "smart", "brave", "famous", "honest"]
-adv1_opts = ["really", "secretly", "always", "often", "rarely"]
+adv1_opts = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
 
 # 2. Update Noun Pluralization for irregulars
 def pluralize_noun(noun):
@@ -97,6 +117,7 @@ final_corpus = generate_full_corpus(
     struct, n1_opts, n2_opts, v_opts, 
     adj1_opts, adj2_opts, adv1_opts
 )
+final_corpus = list(dict.fromkeys(final_corpus))  # remove duplicates, preserve order
 with open(output_file, "w") as f:
     for sentence in final_corpus:
         f.write(sentence + "\n")
