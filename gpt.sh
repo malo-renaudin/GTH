@@ -5,14 +5,14 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
-#SBATCH --time=10:00:00
+#SBATCH --time=2:00:00
 #SBATCH --constraint=h100
 #SBATCH --account=ywa@h100
 #SBATCH --hint=nomultithread
 #SBATCH --partition=gpu_p6
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=malorenaudin1@gmail.com
-#SBATCH --qos=qos_gpu_h100-t3
+#SBATCH --qos=qos_gpu_h100-dev
 #SBATCH --signal=SIGUSR1@90
 
 set -euo pipefail
