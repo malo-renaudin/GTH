@@ -22,7 +22,19 @@ mkdir -p outputs/gpt
 
 # Jean Zay environment setup.
 module purge
-module load cuda/11.8.0-r465
+if module avail cuda 2>&1 | grep -q "cuda/11.8.0-r465"; then
+	module load cuda/11.8.0-r465
+elif module avail cuda 2>&1 | grep -q "cuda/"; then
+	CUDA_MODULE=$(module avail cuda 2>&1 | grep -o 'cuda/[^[:space:]]*' | head -n 1)
+	if [[ -n "${CUDA_MODULE}" ]]; then
+		echo "Loading available CUDA module: ${CUDA_MODULE}"
+		module load "${CUDA_MODULE}"
+	else
+		echo "No CUDA module found. Continuing and relying on environment CUDA runtime."
+	fi
+else
+	echo "No CUDA module found. Continuing and relying on environment CUDA runtime."
+fi
 
 MINICONDA_ROOT="${MINICONDA_ROOT:-$WORK/miniconda3}"
 if [[ ! -f "${MINICONDA_ROOT}/etc/profile.d/conda.sh" ]]; then
