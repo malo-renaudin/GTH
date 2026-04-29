@@ -104,6 +104,18 @@ def compute_structure_probabilities(
     return all_1 / count, all_2 / count, count
         
         
+def step_from_checkpoint(ckpt_file: Path) -> int:
+    """Extract step number from checkpoint file path.
+    Handles both 'step-XXXXX/lit_model.pth' and direct checkpoint file paths."""
+    if ckpt_file.name == "lit_model.pth":
+        # Path like: step-00000100/lit_model.pth
+        return int(ckpt_file.parent.name.split("-")[1])
+    else:
+        # Direct checkpoint file or folder name like: step-00000100
+        parent_name = ckpt_file.parent.name if ckpt_file.is_file() else ckpt_file.name
+        return int(parent_name.split("-")[1])
+
+
 def worker_eval_checkpoint(args_tuple):
     ckpt_file, tokenizer_dir, target_token_lists, set_1, set_2, sentences, max_seq_length = args_tuple
     model = load_checkpoint(ckpt_file, device, max_seq_length)
@@ -111,7 +123,7 @@ def worker_eval_checkpoint(args_tuple):
     mass_1, mass_2, roi_count = compute_structure_probabilities(
         model, tokenizer, sentences, target_token_lists, set_1, set_2
     )
-    step = int(ckpt_file.parent.name.split("-")[1])
+    step = step_from_checkpoint(ckpt_file)
     del model
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -124,6 +136,39 @@ def worker_eval_checkpoint(args_tuple):
     }
     print(f"  step {step}: noun_mass={mass_1:.6f}, verb_mass={mass_2:.6f}, roi_count={roi_count}")
     return result
+
+
+def resolve_checkpoint_file(checkpoint_input: Path) -> Path:
+    """Resolve checkpoint input to a lit_model.pth file.
+    Accepts either a step folder or direct checkpoint file path."""
+    if checkpoint_input.is_file():
+        # Direct checkpoint file
+        if checkpoint_input.name != "lit_model.pth":
+            raise ValueError(f"Expected 'lit_model.pth', got {checkpoint_input.name}")
+        return checkpoint_input
+    elif checkpoint_input.is_dir():
+        # Step folder like 'step-00000100'
+        lit_model_path = checkpoint_input / "lit_model.pth"
+        if not lit_model_path.exists():
+            raise FileNotFoundError(f"No lit_model.pth found in {checkpoint_input}")
+        return lit_model_path
+    else:
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_input}")
+
+
+def run_eval_one_checkpoint(checkpoint_input, tokenizer_dir, target_token_lists, set_1, set_2, sentences, max_seq_length, result_name):
+    """Evaluate a single checkpoint and save result to CSV."""
+    ckpt_file = resolve_checkpoint_file(checkpoint_input)
+    result = worker_eval_checkpoint(
+        (ckpt_file, tokenizer_dir, target_token_lists, set_1, set_2, sentences, max_seq_length)
+    )
+    rows = [result]
+    Path(result_name).parent.mkdir(parents=True, exist_ok=True)
+    with open(result_name, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["step", "noun_mass", "verb_mass", "roi_count", "checkpoint"])
+        writer.writeheader()
+        writer.writerows(rows)
+    return rows
 
 
 def run_eval_over_checkpoints(checkpoint_dir, tokenizer_dir, target_token_lists, set_1, set_2, sentences, num_processes, max_seq_length, result_name):
@@ -161,8 +206,21 @@ def read_nonempty_lines(path: Path) -> List[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run compact noun/verb mass evaluation across checkpoints.")
-    parser.add_argument("--checkpoint-dir", type=Path, required=True)
+    parser = argparse.ArgumentParser(description="Run compact noun/verb mass evaluation on checkpoints.")
+    
+    # Mutually exclusive group for checkpoint source
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--checkpoint",
+        type=Path,
+        help="Path to a single checkpoint (file or step folder like 'step-00000100')."
+    )
+    group.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        help="Directory containing step-*/lit_model.pth checkpoints to scan."
+    )
+    
     parser.add_argument("--tokenizer-dir", type=Path, default=Path("checkpoints/gpt2"))
     parser.add_argument("--sentences-file", type=Path, required=True)
     parser.add_argument("--structure", choices=["orc", "wh"], required=True)
@@ -203,17 +261,33 @@ def main() -> None:
     print()
     # --- END DEBUG ---
 
-    run_eval_over_checkpoints(
-        checkpoint_dir=args.checkpoint_dir,
-        tokenizer_dir=args.tokenizer_dir,
-        target_token_lists=list(target_map.values()),
-        set_1=list(noun_map.values()),
-        set_2=list(verb_map.values()),
-        sentences=sentences,
-        num_processes=args.num_processes,
-        max_seq_length=args.max_seq_length,
-        result_name=args.result_name,
-    )
+    # Route to single-checkpoint or multi-checkpoint mode
+    if args.checkpoint is not None:
+        print(f"Evaluating single checkpoint: {args.checkpoint}")
+        run_eval_one_checkpoint(
+            checkpoint_input=args.checkpoint,
+            tokenizer_dir=args.tokenizer_dir,
+            target_token_lists=list(target_map.values()),
+            set_1=list(noun_map.values()),
+            set_2=list(verb_map.values()),
+            sentences=sentences,
+            max_seq_length=args.max_seq_length,
+            result_name=args.result_name,
+        )
+    else:
+        print(f"Scanning checkpoint directory: {args.checkpoint_dir}")
+        run_eval_over_checkpoints(
+            checkpoint_dir=args.checkpoint_dir,
+            tokenizer_dir=args.tokenizer_dir,
+            target_token_lists=list(target_map.values()),
+            set_1=list(noun_map.values()),
+            set_2=list(verb_map.values()),
+            sentences=sentences,
+            num_processes=args.num_processes,
+            max_seq_length=args.max_seq_length,
+            result_name=args.result_name,
+        )
+    print(f"Results saved to: {args.result_name}")
 
 
 if __name__ == "__main__":
