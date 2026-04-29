@@ -106,7 +106,6 @@ class TrainTask(pydantic.BaseModel):
 class TrainAndEvalTask(pydantic.BaseModel):
     config: Path = Path("gpt.yaml")
     out_dir: Path = Path("out/pretrain/gpt")
-    structure: str  # "orc" or "wh"
     test_file_orc: Path
     test_file_wh: Path
     csv_out: Path = Path("results/live_eval.csv")
@@ -145,26 +144,27 @@ class TrainAndEvalTask(pydantic.BaseModel):
             for ckpt in new_ckpts:
                 step = step_from_checkpoint(ckpt)
 
-                # Select test file based on structure
-                test_file = self.test_file_orc if self.structure == "orc" else self.test_file_wh
+                # Evaluate both ORC and WH structures for this checkpoint
+                for structure, test_file in [("orc", self.test_file_orc), ("wh", self.test_file_wh)]:
+                    row = EvalCheckpointTask(
+                        checkpoint=ckpt,
+                        structure=structure,
+                        sentences_file=test_file,
+                        infra={"folder": self.infra.folder / "eval_ckpt", "cluster": "auto"},
+                    ).process()
 
-                row = EvalCheckpointTask(
-                    checkpoint=ckpt,
-                    structure=self.structure,
-                    sentences_file=test_file,
-                    infra={"folder": self.infra.folder / "eval_ckpt", "cluster": "auto"},
-                ).process()
+                    with self.csv_out.open("a", newline="", encoding="utf-8") as f:
+                        w = csv.DictWriter(
+                            f,
+                            fieldnames=["step", "test_dataset", "noun_mass", "verb_mass", "roi_count", "checkpoint"],
+                        )
+                        w.writerow(row)
 
-                with self.csv_out.open("a", newline="", encoding="utf-8") as f:
-                    w = csv.DictWriter(
-                        f,
-                        fieldnames=["step", "test_dataset", "noun_mass", "verb_mass", "roi_count", "checkpoint"],
-                    )
-                    w.writerow(row)
+                    rows_written += 1
+                    print(f"[eval] step={step} structure={structure} noun={row['noun_mass']:.6f} verb={row['verb_mass']:.6f} roi_count={row.get('roi_count', 0)}")
 
+                # Mark this step as evaluated after both structures are done
                 evaluated_steps.add(step)
-                rows_written += 1
-                print(f"[eval] step={step} noun={row['noun_mass']:.6f} verb={row['verb_mass']:.6f} roi_count={row.get('roi_count', 0)}")
 
             # break condition: training ended and no new ckpt left
             ret = proc.poll()
@@ -185,10 +185,9 @@ class TrainAndEvalTask(pydantic.BaseModel):
 
 if __name__ == "__main__":
     task = TrainAndEvalTask(
-        config=Path("gpt.yaml"),
-        structure="orc",
-        test_file_orc=Path("data/english_data/test_orc7_not_in_train_orc_6_72.txt"),
-        test_file_wh=Path("data/english_data/valid_wh5_not_in_wh_7_20.txt"),
+        config=Path("gpt_baseline.yaml"),
+        test_file_orc=Path("data/test_orc7_not_in_train_orc_6_72.txt"),
+        test_file_wh=Path("data/valid_wh5_not_in_wh_7_20.txt"),
         infra={
             "folder": Path("results/exca_cache/live_train_eval"),
             "cluster": "auto",  # slurm si dispo
