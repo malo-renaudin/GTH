@@ -64,24 +64,16 @@ def find_given_token_in_a_seq(tok_seq, dictionary_tokens):
     return None
 
 def word_mass(logits: torch.Tensor, word_token_lists: List[List[int]]) -> float:
-    """Average-logit probability mass for a set of words (each possibly multi-token).
-    For each word we average the logits of its constituent tokens, then softmax
-    across all vocabulary positions and sum over those word positions."""
-    # Build one representative logit per word by averaging across its tokens
-    vocab_logits = logits.clone()
-    # Collect the averaged logit for each word and the token to put it at
-    word_representatives = []
-    for tokens in word_token_lists:
-        ids = torch.tensor(tokens, device=logits.device)
-        word_representatives.append(vocab_logits[ids].mean())
-    if not word_representatives:
+    """Sum of average probabilities across all words (each possibly multi-token).
+    For each word: average probabilities of its tokens, then sum across words."""
+    if not word_token_lists:
         return 0.0
     probs = torch.softmax(logits, dim=-1)
     total = 0.0
     for tokens in word_token_lists:
         ids = torch.tensor(tokens, device=logits.device)
         total += probs[ids].mean().item()
-    return total / len(word_token_lists)
+    return total
 
 
 #run the model until the first target-word token is met, then score noun/verb mass
@@ -92,7 +84,7 @@ def compute_structure_probabilities(
     target_token_lists: List[List[int]],
     other_token_lists_1: List[List[int]],
     other_token_lists_2: List[List[int]],
-) -> Tuple[float, float]:
+) -> Tuple[float, float, int]:
     target_flat = {t for tl in target_token_lists for t in tl}
     all_1, all_2, count = 0.0, 0.0, 0
     for s in tqdm(sentences, desc="  sentences", leave=False):
@@ -107,22 +99,30 @@ def compute_structure_probabilities(
         all_2 += word_mass(logits, other_token_lists_2)
         count += 1
     if count == 0:
-        return 0.0, 0.0
-    return all_1 / count, all_2 / count
+        return 0.0, 0.0, count
+    return all_1 / count, all_2 / count, count
         
         
 def worker_eval_checkpoint(args_tuple):
     ckpt_file, tokenizer_dir, target_token_lists, set_1, set_2, sentences, max_seq_length = args_tuple
     model = load_checkpoint(ckpt_file, device, max_seq_length)
     tokenizer = Tokenizer(tokenizer_dir)
-    mass_1, mass_2 = compute_structure_probabilities(
+    mass_1, mass_2, roi_count = compute_structure_probabilities(
         model, tokenizer, sentences, target_token_lists, set_1, set_2
     )
     step = int(ckpt_file.parent.name.split("-")[1])
     del model
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    return {"step": step, "noun_mass": mass_1, "verb_mass": mass_2, "checkpoint": str(ckpt_file)}
+    result = {
+        "step": step,
+        "noun_mass": round(mass_1, 6),
+        "verb_mass": round(mass_2, 6),
+        "roi_count": roi_count,
+        "checkpoint": str(ckpt_file),
+    }
+    print(f"  step {step}: noun_mass={mass_1:.6f}, verb_mass={mass_2:.6f}, roi_count={roi_count}")
+    return result
 
 
 def run_eval_over_checkpoints(checkpoint_dir, tokenizer_dir, target_token_lists, set_1, set_2, sentences, num_processes, max_seq_length, result_name):
@@ -148,7 +148,7 @@ def run_eval_over_checkpoints(checkpoint_dir, tokenizer_dir, target_token_lists,
     rows.sort(key=lambda r: r["step"])
     Path(result_name).parent.mkdir(parents=True, exist_ok=True)
     with open(result_name, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["step", "noun_mass", "verb_mass", "checkpoint"])
+        writer = csv.DictWriter(f, fieldnames=["step", "noun_mass", "verb_mass", "roi_count", "checkpoint"])
         writer.writeheader()
         writer.writerows(rows)
     return rows
