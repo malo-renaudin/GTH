@@ -11,6 +11,9 @@ import pydantic
 import exca as xk
 
 
+REPO_ROOT = Path(__file__).resolve().parent
+
+
 def list_step_checkpoints(out_dir: Path) -> List[Path]:
     ckpts = []
     for p in out_dir.glob("step-*/lit_model.pth"):
@@ -49,29 +52,40 @@ class EvalCheckpointTask(pydantic.BaseModel):
     @infra.apply
     def process(self) -> Dict:
         """Evaluate a single checkpoint using eval_test.py in single-checkpoint mode."""
-        step = step_from_checkpoint(self.checkpoint)
-        temp_csv = Path(f"results/eval_tmp_step_{step}.csv")
+        checkpoint = self.checkpoint.resolve()
+        sentences_file = self.sentences_file.resolve()
+        tokenizer_dir = self.tokenizer_dir.resolve()
+        step = step_from_checkpoint(checkpoint)
+        temp_csv = (REPO_ROOT / f"results/eval_tmp_step_{step}_{self.structure}.csv").resolve()
         temp_csv.parent.mkdir(parents=True, exist_ok=True)
 
         # Call eval_test.py with single-checkpoint mode
         cmd = [
             "python",
-            "eval_test.py",
+            str((REPO_ROOT / "eval_test.py").resolve()),
             "--checkpoint",
-            str(self.checkpoint),
+            str(checkpoint),
             "--sentences-file",
-            str(self.sentences_file),
+            str(sentences_file),
             "--structure",
             self.structure,
             "--tokenizer-dir",
-            str(self.tokenizer_dir),
+            str(tokenizer_dir),
             "--max-seq-length",
             str(self.max_seq_length),
             "--result-name",
             str(temp_csv),
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "eval_test.py failed for checkpoint "
+                f"{checkpoint}\n"
+                f"command: {' '.join(cmd)}\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            )
         print(f"[eval_test] step {step}:\n{result.stdout}")
 
         # Parse the CSV output
@@ -84,7 +98,7 @@ class EvalCheckpointTask(pydantic.BaseModel):
                     break
 
         if row is None:
-            raise RuntimeError(f"eval_test.py produced no output for checkpoint {self.checkpoint}")
+            raise RuntimeError(f"eval_test.py produced no output for checkpoint {checkpoint}")
 
         noun_mass = float(row["noun_mass"])
         verb_mass = float(row["verb_mass"])
