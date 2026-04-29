@@ -216,7 +216,7 @@ class TrainAndEvalTask(pydantic.BaseModel):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train + evaluate checkpoints (ORC and WH) with EXCA.")
     parser.add_argument("--config", type=Path, default=Path("gpt_baseline.yaml"))
-    parser.add_argument("--test-file-orc", type=Path, default=Path("data/test_orc7_not_in_train_orc_6_72.txt"))
+    parser.add_argument("--test-file-orc", type=Path, default=Path("data/valid_orc7_not_in_train_orc_6_72.txt"))
     parser.add_argument("--test-file-wh", type=Path, default=Path("data/valid_wh5_not_in_wh_7_20.txt"))
     parser.add_argument("--csv-out", type=Path, default=Path("results/eval_baseline.csv"))
     parser.add_argument("--poll-seconds", type=int, default=30)
