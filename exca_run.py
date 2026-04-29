@@ -179,7 +179,11 @@ class TrainAndEvalTask(pydantic.BaseModel):
                         checkpoint=ckpt,
                         structure=structure,
                         sentences_file=test_file,
-                        infra={"folder": self.infra.folder / "eval_ckpt", "cluster": "local"},
+                        infra={
+                            "folder": self.infra.folder / "eval_ckpt",
+                            "cluster": None,
+                            "mode": "force",
+                        },
                     ).process()
 
                     with self.csv_out.open("a", newline="", encoding="utf-8") as f:
