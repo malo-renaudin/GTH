@@ -48,10 +48,11 @@ def tokenize_sentences(sentences: List[str], tokenizer: Tokenizer) -> List[List[
     return [tokenizer.encode(sentence) for sentence in sentences]
 
 #create a dictionary mapping words to lists of token ids (handles multi-token words)
+# words in sentences are preceded by a space, so we encode with a leading space
 def create_word_to_token_mapping(list_of_words, tokenizer: Tokenizer) -> Dict[str, List[int]]:
     word_to_token = {}
     for w in list_of_words:
-        tokens = tokenizer.encode(w).tolist()
+        tokens = tokenizer.encode(" " + w, bos=False, eos=False).tolist()
         word_to_token[w] = tokens
     return word_to_token
 
@@ -181,6 +182,27 @@ def main() -> None:
         verb_map   = create_word_to_token_mapping(verbs_wh, tokenizer)
 
     sentences = read_nonempty_lines(args.sentences_file)
+
+    # --- DEBUG ---
+    print(f"\n[DEBUG] Structure: {args.structure}")
+    print(f"[DEBUG] Target verb token ids:")
+    for w, toks in target_map.items():
+        print(f"  '{w}' -> {toks}")
+    print(f"[DEBUG] Noun token ids:")
+    for w, toks in noun_map.items():
+        print(f"  '{w}' -> {toks}")
+    print(f"[DEBUG] Sentences loaded: {len(sentences)}")
+    print(f"[DEBUG] First 3 sentences:")
+    for s in sentences[:3]:
+        toks = tokenizer.encode(s).tolist()
+        target_flat = {t for tl in target_map.values() for t in tl}
+        idx = find_given_token_in_a_seq(toks, target_flat)
+        print(f"  sentence : {s}")
+        print(f"  token ids: {toks}")
+        print(f"  ROI idx  : {idx} ({'MATCHED' if idx is not None else 'NO MATCH'})")
+    print()
+    # --- END DEBUG ---
+
     run_eval_over_checkpoints(
         checkpoint_dir=args.checkpoint_dir,
         tokenizer_dir=args.tokenizer_dir,
