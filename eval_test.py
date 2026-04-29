@@ -1,7 +1,9 @@
 import argparse
 import csv
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
+
+from tqdm import tqdm
 
 import torch
 
@@ -45,15 +47,12 @@ def load_checkpoint(ckpt_file, device, max_seq_length):
 def tokenize_sentences(sentences: List[str], tokenizer: Tokenizer) -> List[List[int]]:
     return [tokenizer.encode(sentence) for sentence in sentences]
 
-#create a dictionary mapping words to tokens
-def create_word_to_token_mapping(list_of_words, tokenizer: Tokenizer) -> Dict[str, int]:
+#create a dictionary mapping words to lists of token ids (handles multi-token words)
+def create_word_to_token_mapping(list_of_words, tokenizer: Tokenizer) -> Dict[str, List[int]]:
     word_to_token = {}
     for w in list_of_words:
-        token = tokenizer.encode(w)
-        if len(token) == 1:
-            word_to_token[w] = token[0]
-        else:
-            print(f"Warning: '{w}' is tokenized into multiple tokens {token}, skipping.")
+        tokens = tokenizer.encode(w).tolist()
+        word_to_token[w] = tokens
     return word_to_token
 
 #cut a sequence of token if a given token is in the list
@@ -64,39 +63,95 @@ def find_given_token_in_a_seq(tok_seq, dictionary_tokens):
             return idx
     return None
 
-#run the model until a token from a given dictionary is met, extract logits for two other dictionaries, and compute probability mass for eahc dictionnary
-def compute_structure_probabilities(model: GPT, sentences, target_tokens: Set[int], other_tokens_1: Set[int], other_tokens_2: Set[int]) -> Tuple[float, float]:
-    for s in sentences:
-        tok = tokenize_sentences([s], model.tokenizer)[0]
-        input_ids = torch.tensor(tok, device=device).unsqueeze(0)
-        idx = find_given_token_in_a_seq(input_ids, target_tokens)
-        input_ids = input_ids[:, :idx+1] 
+def word_mass(logits: torch.Tensor, word_token_lists: List[List[int]]) -> float:
+    """Average-logit probability mass for a set of words (each possibly multi-token).
+    For each word we average the logits of its constituent tokens, then softmax
+    across all vocabulary positions and sum over those word positions."""
+    # Build one representative logit per word by averaging across its tokens
+    vocab_logits = logits.clone()
+    # Collect the averaged logit for each word and the token to put it at
+    word_representatives = []
+    for tokens in word_token_lists:
+        ids = torch.tensor(tokens, device=logits.device)
+        word_representatives.append(vocab_logits[ids].mean())
+    if not word_representatives:
+        return 0.0
+    probs = torch.softmax(logits, dim=-1)
+    total = 0.0
+    for tokens in word_token_lists:
+        ids = torch.tensor(tokens, device=logits.device)
+        total += probs[ids].mean().item()
+    return total / len(word_token_lists)
+
+
+#run the model until the first target-word token is met, then score noun/verb mass
+def compute_structure_probabilities(
+    model: GPT,
+    tokenizer: Tokenizer,
+    sentences: List[str],
+    target_token_lists: List[List[int]],
+    other_token_lists_1: List[List[int]],
+    other_token_lists_2: List[List[int]],
+) -> Tuple[float, float]:
+    target_flat = {t for tl in target_token_lists for t in tl}
+    all_1, all_2, count = 0.0, 0.0, 0
+    for s in tqdm(sentences, desc="  sentences", leave=False):
+        tok = tokenizer.encode(s).tolist()
+        idx = find_given_token_in_a_seq(tok, target_flat)
+        if idx is None:
+            continue
+        input_ids = torch.tensor(tok[:idx + 1], device=device).unsqueeze(0)
         with torch.no_grad():
-            outputs = model(input_ids)
-            logits = outputs.logits[0, -1, :]
-            other_1_prob = torch.sum(logits[other_tokens_1].softmax(dim=0)).item()
-            other_2_prob = torch.sum(logits[other_tokens_2].softmax(dim=0)).item()
-            return other_1_prob, other_2_prob
+            logits = model(input_ids)[0, -1, :]
+        all_1 += word_mass(logits, other_token_lists_1)
+        all_2 += word_mass(logits, other_token_lists_2)
+        count += 1
+    if count == 0:
+        return 0.0, 0.0
+    return all_1 / count, all_2 / count
         
         
-def run_eval_in_parallel(checkpoint_dir, target_tokens, set_1, set_2, sentences, num_processes, max_seq_length, result_name):
+def worker_eval_checkpoint(args_tuple):
+    ckpt_file, tokenizer_dir, target_token_lists, set_1, set_2, sentences, max_seq_length = args_tuple
+    model = load_checkpoint(ckpt_file, device, max_seq_length)
+    tokenizer = Tokenizer(tokenizer_dir)
+    mass_1, mass_2 = compute_structure_probabilities(
+        model, tokenizer, sentences, target_token_lists, set_1, set_2
+    )
+    step = int(ckpt_file.parent.name.split("-")[1])
+    del model
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return {"step": step, "noun_mass": mass_1, "verb_mass": mass_2, "checkpoint": str(ckpt_file)}
+
+
+def run_eval_over_checkpoints(checkpoint_dir, tokenizer_dir, target_token_lists, set_1, set_2, sentences, num_processes, max_seq_length, result_name):
     from concurrent.futures import ProcessPoolExecutor
+    
+    ckpt_files = sorted(
+        checkpoint_dir.glob("step-*/lit_model.pth"),
+        key=lambda p: int(p.parent.name.split("-")[1]),
+    )
+    if not ckpt_files:
+        raise FileNotFoundError(f"No step checkpoints found under {checkpoint_dir}")
 
-    def worker(ckpt_file):
-        model = load_checkpoint(ckpt_file, device, max_seq_length)
-        return compute_structure_probabilities(model, sentences, target_tokens, set_1, set_2)
-
-    ckpt_files = list(Path(checkpoint_dir).glob("*.pt"))
+    work_items = [
+        (ckpt, tokenizer_dir, target_token_lists, set_1, set_2, sentences, max_seq_length)
+        for ckpt in ckpt_files
+    ]
+    
+    rows = []
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
-        results = list(executor.map(worker, ckpt_files))
-        #return results as a csv : put probability masses and checkpoint name
-        
-        with open(result_name, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(["Other 1 Probability", "Other 2 Probability"])
-            for result in results:
-                writer.writerow(result)
-    return results
+        for result in tqdm(executor.map(worker_eval_checkpoint, work_items), total=len(work_items), desc="checkpoints"):
+            rows.append(result)
+    
+    rows.sort(key=lambda r: r["step"])
+    Path(result_name).parent.mkdir(parents=True, exist_ok=True)
+    with open(result_name, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["step", "noun_mass", "verb_mass", "checkpoint"])
+        writer.writeheader()
+        writer.writerows(rows)
+    return rows
 
 
 def read_nonempty_lines(path: Path) -> List[str]:
@@ -117,20 +172,21 @@ def main() -> None:
 
     tokenizer = Tokenizer(args.tokenizer_dir)
     if args.structure == "orc":
-        target_tokens = set(create_word_to_token_mapping(verbs_orc, tokenizer).values())
-        set_1 = set(create_word_to_token_mapping(nouns_orc, tokenizer).values())
-        set_2 = set(create_word_to_token_mapping(verbs_orc, tokenizer).values())
+        target_map = create_word_to_token_mapping(verbs_orc, tokenizer)
+        noun_map   = create_word_to_token_mapping(nouns_orc, tokenizer)
+        verb_map   = create_word_to_token_mapping(verbs_orc, tokenizer)
     else:
-        target_tokens = set(create_word_to_token_mapping(verbs_wh, tokenizer).values())
-        set_1 = set(create_word_to_token_mapping(nouns_wh, tokenizer).values())
-        set_2 = set(create_word_to_token_mapping(verbs_wh, tokenizer).values())
+        target_map = create_word_to_token_mapping(verbs_wh, tokenizer)
+        noun_map   = create_word_to_token_mapping(nouns_wh, tokenizer)
+        verb_map   = create_word_to_token_mapping(verbs_wh, tokenizer)
 
     sentences = read_nonempty_lines(args.sentences_file)
-    run_eval_in_parallel(
+    run_eval_over_checkpoints(
         checkpoint_dir=args.checkpoint_dir,
-        target_tokens=target_tokens,
-        set_1=set_1,
-        set_2=set_2,
+        tokenizer_dir=args.tokenizer_dir,
+        target_token_lists=list(target_map.values()),
+        set_1=list(noun_map.values()),
+        set_2=list(verb_map.values()),
         sentences=sentences,
         num_processes=args.num_processes,
         max_seq_length=args.max_seq_length,
