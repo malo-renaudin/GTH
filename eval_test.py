@@ -237,8 +237,8 @@ def compute_one_checkpoint(
             head_list = [tokenizer.encode(" " + head, bos=False, eos=False).tolist()]
             # Average probability for full NP (length-normalized) and for head noun only
             target = lexical_mass(probs, np_lists) / max(1, len(np_lists))
-            target_head = lexical_mass(probs, head_list)
-            comp = lexical_mass(probs, orc_verb_continuation_lists)
+            target_head = lexical_mass(probs, head_list) / max(1, len(head_list))
+            comp = lexical_mass(probs, orc_verb_continuation_lists) / max(1, len(orc_verb_continuation_lists))
             t_label, c_label = "moved_np_mass", "verb_mass"
         else:
             # WH: sum probability for all WH NPs, compare to question mark.
@@ -246,8 +246,8 @@ def compute_one_checkpoint(
             # it prefers "?" over an NP filler because the gap is already filled by the fronted WH phrase.
             # Same direction as ORC: for ORC, target_minus_comparator < 0 means the model prefers
             # verb continuation over the moved NP, i.e. it knows the object gap is already filled.
-            target = lexical_mass(probs, wh_np_vocab_lists)
-            target_head = lexical_mass(probs, wh_noun_lists)  # noun-only mass (parallel to ORC head)
+            target = lexical_mass(probs, wh_np_vocab_lists)/max(1, len(wh_np_vocab_lists))  # average over all WH NP variants
+            target_head = lexical_mass(probs, wh_noun_lists)/max(1, len(wh_noun_lists))  # noun-only mass (parallel to ORC head)
             comp = lexical_mass(probs, [sorted(qmark)])  # treat all ?-token variants as one group
             t_label, c_label = "wh_np_vocab_mass", "question_mark_mass"
 
