@@ -96,14 +96,25 @@ def tokenize_sentence(
     return tokens, spans
 
 
-def find_rel_marker_token_pos(
+def find_rel_marker_span_idx(
     spans: List[Tuple[str, int, int]]
 ) -> Optional[int]:
-    """Return the last-token index (in the flat token list) of the first 'that'/'who'."""
-    for word, start, end in spans:
+    """Return the spans-list index of the first 'that'/'who', or None."""
+    for i, (word, start, end) in enumerate(spans):
         if normalize_word(word) in REL_MARKERS:
-            return end - 1  # last token of the relativizer word
+            return i
     return None
+
+
+def find_post_rel_token_pos(
+    spans: List[Tuple[str, int, int]]
+) -> Optional[int]:
+    """Return the last-token index of the word immediately after 'that'/'who'."""
+    rel_idx = find_rel_marker_span_idx(spans)
+    if rel_idx is None or rel_idx + 1 >= len(spans):
+        return None
+    _, _, end = spans[rel_idx + 1]
+    return end - 1
 
 
 # ── Hidden-state collection ───────────────────────────────────────────────────
@@ -144,18 +155,21 @@ def collect_hidden_states(
     try:
         for sent in tqdm(sentences, desc="  collecting activations", leave=False):
             tokens, spans = tokenize_sentence(sent, tokenizer)
-            rel_pos = find_rel_marker_token_pos(spans)
-            if rel_pos is None:
+            rel_idx = find_rel_marker_span_idx(spans)
+            if rel_idx is None or rel_idx + 1 >= len(spans):
                 all_activations.append(None)
                 next_tok_ids.append(None)
                 continue
 
-            # First token of the word right after the relativizer
-            next_word_spans = [(w, s, e) for w, s, e in spans if s > rel_pos]
-            next_tok_id = tokens[next_word_spans[0][1]] if next_word_spans else None
+            # Probe at the word immediately after the relativizer
+            _, _, probe_end = spans[rel_idx + 1]
+            probe_pos = probe_end - 1
 
-            target_pos[0] = rel_pos
-            x = torch.tensor(tokens[: rel_pos + 1], device=device).unsqueeze(0)
+            # Next token id: first token of the word two positions after the relativizer
+            next_tok_id = tokens[spans[rel_idx + 2][1]] if rel_idx + 2 < len(spans) else None
+
+            target_pos[0] = probe_pos
+            x = torch.tensor(tokens[: probe_pos + 1], device=device).unsqueeze(0)
             with torch.no_grad():
                 _ = model(x)
 
@@ -224,19 +238,21 @@ def collect_next_token_probs(
     try:
         for sent in tqdm(sentences, desc="  next-token probs", leave=False):
             tokens, spans = tokenize_sentence(sent, tokenizer)
-            rel_pos = find_rel_marker_token_pos(spans)
-            if rel_pos is None:
+            rel_idx = find_rel_marker_span_idx(spans)
+            if rel_idx is None or rel_idx + 1 >= len(spans):
                 probs.append(None)
                 continue
 
-            next_word_spans = [(w, s, e) for w, s, e in spans if s > rel_pos]
-            if not next_word_spans:
+            _, _, probe_end = spans[rel_idx + 1]
+            probe_pos = probe_end - 1
+
+            if rel_idx + 2 >= len(spans):
                 probs.append(None)
                 continue
-            next_tok_id = tokens[next_word_spans[0][1]]
+            next_tok_id = tokens[spans[rel_idx + 2][1]]
 
-            target_pos[0] = rel_pos
-            x = torch.tensor(tokens[: rel_pos + 1], device=device).unsqueeze(0)
+            target_pos[0] = probe_pos
+            x = torch.tensor(tokens[: probe_pos + 1], device=device).unsqueeze(0)
             with torch.no_grad():
                 logits = model(x)[0, -1, :]
             p = torch.softmax(logits, dim=-1)
