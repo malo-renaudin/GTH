@@ -366,6 +366,8 @@ def main() -> None:
                     help="Output JSON with positive-t neuron list")
     ap.add_argument("--top-pct", type=float, default=1.0,
                     help="Top %% of positive-t neurons to ablate (default: 1.0)")
+    ap.add_argument("--min-cohens-d", type=float, default=0.5,
+                    help="Minimum |Cohen's d| for a neuron to be considered selective (default: 0.5)")
     ap.add_argument("--device",  type=str, default=None,
                     help="Force device, e.g. 'cpu' or 'cuda:1'")
     args = ap.parse_args()
@@ -413,32 +415,41 @@ def main() -> None:
     n_embd    = n_neurons // n_layers
     print(f"  hidden dim per layer: {n_embd}, total neurons: {n_neurons}")
 
-    # ── 2. Paired t-test per neuron + Bonferroni correction ────────────────────
-    print("\n[2/3] Running paired t-tests (ORC vs SRC) with Bonferroni correction …")
-    t_stats    = np.empty(n_neurons, dtype=np.float64)
-    p_vals     = np.empty(n_neurons, dtype=np.float64)
-    mean_delta = np.empty(n_neurons, dtype=np.float64)
+    # ── 2. Paired t-test per neuron + Bonferroni + Cohen's d ────────────────
+    print("\n[2/3] Running paired t-tests (ORC vs SRC) with Bonferroni + Cohen's d filter …")
+    diffs      = (orc_acts - src_acts).astype(np.float64)   # shape (n_pairs, n_neurons)
+    mean_delta = diffs.mean(axis=0)
+    std_delta  = diffs.std(axis=0, ddof=1)
+    cohens_d   = mean_delta / (std_delta + 1e-12)
+
+    t_stats = np.empty(n_neurons, dtype=np.float64)
+    p_vals  = np.empty(n_neurons, dtype=np.float64)
     for i in range(n_neurons):
         t, p = stats.ttest_rel(orc_acts[:, i], src_acts[:, i])
-        t_stats[i]    = t
-        p_vals[i]     = p
-        mean_delta[i] = float(np.mean(orc_acts[:, i] - src_acts[:, i]))
+        t_stats[i] = t
+        p_vals[i]  = p
 
-    p_vals_bonf    = np.clip(p_vals * n_neurons, 0.0, 1.0)
-    pos_idx        = np.where(t_stats > 0)[0]
+    p_vals_bonf = np.clip(p_vals * n_neurons, 0.0, 1.0)
+
+    selective = (t_stats > 0) & (p_vals_bonf < 0.05) & (cohens_d >= args.min_cohens_d)
+    pos_idx        = np.where(selective)[0]
     pos_idx_sorted = pos_idx[np.argsort(t_stats[pos_idx])[::-1]]   # descending by t
-    n_sig = int(np.sum((t_stats > 0) & (p_vals_bonf < 0.05)))
-    print(f"  Neurons with t > 0 (ORC > SRC): {len(pos_idx_sorted)} / {n_neurons}")
-    print(f"  Significant after Bonferroni (t > 0, p_bonf < 0.05): {n_sig}")
+
+    n_pos  = int(np.sum(t_stats > 0))
+    n_bonf = int(np.sum((t_stats > 0) & (p_vals_bonf < 0.05)))
+    print(f"  Neurons with t > 0 (ORC > SRC): {n_pos} / {n_neurons}")
+    print(f"  Significant after Bonferroni (p_bonf < 0.05): {n_bonf}")
+    print(f"  Also |Cohen's d| >= {args.min_cohens_d}: {len(pos_idx_sorted)}")
 
     neuron_records = [
         {
-            "flat_idx":    int(idx),
-            "layer":       int(idx // n_embd),
-            "dim":         int(idx % n_embd),
-            "t_stat":      float(t_stats[idx]),
-            "mean_delta":  float(mean_delta[idx]),
-            "p_value":     float(p_vals[idx]),
+            "flat_idx":     int(idx),
+            "layer":        int(idx // n_embd),
+            "dim":          int(idx % n_embd),
+            "t_stat":       float(t_stats[idx]),
+            "mean_delta":   float(mean_delta[idx]),
+            "cohens_d":     float(cohens_d[idx]),
+            "p_value":      float(p_vals[idx]),
             "p_value_bonf": float(p_vals_bonf[idx]),
         }
         for idx in pos_idx_sorted
@@ -449,9 +460,10 @@ def main() -> None:
     print(f"  Saved neuron list → {args.output}")
 
     # ── 3. Ablation of top-N% neurons ────────────────────────────────────────
-    n_top   = max(1, int(np.ceil(args.top_pct / 100.0 * n_neurons)))
+    n_selective = len(pos_idx_sorted)
+    n_top   = max(1, int(np.ceil(args.top_pct / 100.0 * n_selective)))
     top_idx = pos_idx_sorted[:n_top]
-    print(f"\n[3/3] Ablating top {args.top_pct}% = {n_top} neurons …")
+    print(f"\n[3/3] Ablating top {args.top_pct}% of {n_selective} selective neurons = {n_top} neurons …")
 
     if neuron_records:
         top5 = [(r["layer"], r["dim"], round(r["t_stat"], 3)) for r in neuron_records[:5]]
