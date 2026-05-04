@@ -1,7 +1,6 @@
 import argparse
 import csv
 from concurrent.futures import ProcessPoolExecutor
-import itertools
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -22,16 +21,19 @@ adj1_opts = ["young", "tall", "smart", "brave", "kind",
              "famous"]
 adj2_opts = ["creative", "serious", "friendly", "quiet", "active"] 
            
-np_wh = [itertools.product(n1_opts_wh, adj1_opts), itertools.product(n2_opts_wh, adj2_opts)]
-
-verbs_orc = ["is", "are", "likes", "like", "enjoys", "enjoy"]
+np_wh: List[Tuple[str, str]] = (
+    [(n, a) for n in n1_opts_wh for a in adj1_opts] +
+    [(n, a) for n in n2_opts_wh for a in adj2_opts]
+)
+verbs_orc_continuation = ["is", "are", "likes", "like", "enjoys", "enjoy"]
+verbs_orc = ["visits", "visit", "helps", "help", "avoids", "avoid", "follows", "follow", "greets", "greet"]
 verbs_wh = [
     "visit", "visited", "visiting", "help", "helped", "helping", "greet", "greeted", "greeting",
     "follow", "followed", "following", "avoid", "avoided", "avoiding", "call", "called", "calling",
     "observe", "observed", "observing",
 ]
 
-ORC_REL_MARKERS = {"that", "who", "the"}#peut etre qu'il faut ajouter the ici
+ORC_REL_MARKERS = {"that", "who"}#peut etre qu'il faut ajouter the ici
 CSV_FIELDS = [
     "step",
     "structure",
@@ -39,6 +41,7 @@ CSV_FIELDS = [
     "comparator_label",
     "target_mass",
     "target_head_mass",
+    "the_mass",
     "comparator_mass",
     "target_minus_comparator",
     "roi_count",
@@ -100,6 +103,19 @@ def normalize_word(word: str) -> str:
     return word.strip(".,?!;:\"'()[]{}").lower()
 
 
+def _word_token_spans(sentence: str, tokenizer: "Tokenizer") -> Tuple[List[int], List[Tuple[str, int, int]]]:
+    """Tokenize sentence without BOS and return (token_ids, [(word, start, end), ...])."""
+    tok, pos = [], 0
+    spans = []
+    for i, word in enumerate(sentence.split()):
+        prefix = "" if i == 0 else " "
+        ids = tokenizer.encode(prefix + word, bos=False, eos=False).tolist()
+        spans.append((word, pos, pos + len(ids)))
+        tok.extend(ids)
+        pos += len(ids)
+    return tok, spans
+
+
 def lexical_mass(probs: torch.Tensor, token_lists: List[List[int]]) -> float:
     """
     For a list of token id lists (words/phrases), sum the mean probability for each.
@@ -129,6 +145,8 @@ def extract_orc_moved_np(sentence: str, noun_forms_orc: Set[str]) -> Tuple[List[
     for i in range(1, len(words)):
         w = normalize_word(words[i])
         if w in ORC_REL_MARKERS:
+            break
+        if w == "the":          # zero-relativizer: second "the" starts embedded subject NP
             break
         if w in noun_candidates:
             head_idx = i
@@ -160,33 +178,46 @@ def compute_one_checkpoint(
     model = load_checkpoint(ckpt_file, device, max_seq_length)
 
     # Prepare token lists for ROI detection and scoring
-    roi_verbs = verbs_orc if structure == "orc" else verbs_wh
-    roi_target_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in roi_verbs]
-    roi_target_flat = {t for lst in roi_target_lists for t in lst}
+    roi_verb_set = set(verbs_orc if structure == "orc" else verbs_wh)
+    # roi_target_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in roi_verb_set]
+    # roi_target_flat = {t for lst in roi_target_lists for t in lst}
 
-    orc_verb_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc]
+    # orc_verb_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc]
+    orc_verb_continuation_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc_continuation]
     wh_np_vocab_lists = [
-        tokenizer.encode(" " + " ".join(w), bos=False, eos=False).tolist()
-        for w in sorted(np_wh)
+        tokenizer.encode(" " + " ".join([a, n]), bos=False, eos=False).tolist()
+        for n, a in np_wh
+    ]
+    wh_noun_lists = [
+        tokenizer.encode(" " + n, bos=False, eos=False).tolist()
+        for n in (n1_opts_wh + n2_opts_wh)
     ]
     # Get all token ids for question mark (with and without leading space)
     qmark: Set[int] = set()
     for p in ["?", " ?"]:
         qmark.update(tokenizer.encode(p, bos=False, eos=False).tolist())
     orc_noun_forms = nouns_orc
+    the_lists = [tokenizer.encode(" the", bos=False, eos=False).tolist()]
 
-    t_sum, th_sum, c_sum, n = 0.0, 0.0, 0.0, 0
+    t_sum, th_sum, the_sum, c_sum, n = 0.0, 0.0, 0.0, 0.0, 0
     t_label, c_label = (
         ("moved_np_mass", "verb_mass") if structure == "orc" else ("wh_np_vocab_mass", "question_mark_mass")
     )
 
     for s in tqdm(sentences, desc="  sentences", leave=False):
         # Tokenize sentence and find ROI (first verb token)
-        tok = tokenizer.encode(s).tolist()
+        tok, spans = _word_token_spans(s, tokenizer)
         roi_idx = None
-        for i, t in enumerate(tok):
-            if t in roi_target_flat:
-                roi_idx = i
+        for span_i, (word, start, end) in enumerate(spans):
+            if normalize_word(word) in roi_verb_set:
+                if structure == "wh" and word.endswith("?"):
+                    # "?" is attached to the verb (e.g. "visit?"); back off to the token
+                    # just before "?" so the model predicts at the gap, not after "?".
+                    prefix = "" if span_i == 0 else " "
+                    verb_ids = tokenizer.encode(prefix + word.rstrip("?"), bos=False, eos=False).tolist()
+                    roi_idx = start + len(verb_ids) - 1
+                else:
+                    roi_idx = end - 1   # last token of the (possibly multi-token) RC verb
                 break
         if roi_idx is None:
             continue
@@ -207,17 +238,21 @@ def compute_one_checkpoint(
             # Average probability for full NP (length-normalized) and for head noun only
             target = lexical_mass(probs, np_lists) / max(1, len(np_lists))
             target_head = lexical_mass(probs, head_list)
-            comp = lexical_mass(probs, orc_verb_lists)
+            comp = lexical_mass(probs, orc_verb_continuation_lists)
             t_label, c_label = "moved_np_mass", "verb_mass"
         else:
-            # WH: sum probability for all WH NPs, compare to question mark
+            # WH: sum probability for all WH NPs, compare to question mark.
+            # target_minus_comparator < 0 means model correctly prefers ")" over NP filler
+            # (gap is filled by the fronted WH phrase), i.e. the model understands WH movement.
             target = lexical_mass(probs, wh_np_vocab_lists)
-            target_head = target
+            target_head = lexical_mass(probs, wh_noun_lists)  # noun-only mass (parallel to ORC head)
             comp = lexical_mass(probs, [sorted(qmark)])  # treat all ?-token variants as one group
             t_label, c_label = "wh_np_vocab_mass", "question_mark_mass"
 
+        the_mass = lexical_mass(probs, the_lists)
         t_sum += target
         th_sum += target_head
+        the_sum += the_mass
         c_sum += comp
         n += 1
 
@@ -227,11 +262,11 @@ def compute_one_checkpoint(
 
     step = step_from_checkpoint(ckpt_file)
     if n == 0:
-        t_avg = th_avg = c_avg = 0.0
+        t_avg = th_avg = the_avg = c_avg = 0.0
     else:
-        t_avg, th_avg, c_avg = t_sum / n, th_sum / n, c_sum / n
+        t_avg, th_avg, the_avg, c_avg = t_sum / n, th_sum / n, the_sum / n, c_sum / n
 
-    print(f"  step {step}: target_mass={t_avg:.6f}, comparator_mass={c_avg:.6f}, roi_count={n}")
+    print(f"  step {step}: target_mass={t_avg:.6f}, the_mass={the_avg:.6f}, comparator_mass={c_avg:.6f}, roi_count={n}")
 
     return {
         "step": step,
@@ -240,6 +275,7 @@ def compute_one_checkpoint(
         "comparator_label": c_label,
         "target_mass": round(t_avg, 6),
         "target_head_mass": round(th_avg, 6),
+        "the_mass": round(the_avg, 6),
         "comparator_mass": round(c_avg, 6),
         "target_minus_comparator": round(t_avg - c_avg, 6),
         "roi_count": n,
