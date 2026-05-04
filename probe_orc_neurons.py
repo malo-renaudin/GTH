@@ -209,14 +209,13 @@ def eval_orc_task(
 ):
     blocks = get_transformer_blocks(model)
     handles = []
-    target_pos = [0]
 
     if ablate_dims:
         def make_ablation_hook(layer_idx, dims):
             def hook(module, inp, out):
                 h = out[0] if isinstance(out, tuple) else out
                 h = h.clone()
-                h[0, target_pos[0], dims] = 0.0
+                h[0, :, dims] = 0.0  # zero at every token position
                 return (h,) + out[1:] if isinstance(out, tuple) else h
             return hook
         for layer_idx, dims in ablate_dims.items():
@@ -234,15 +233,11 @@ def eval_orc_task(
         for sent in tqdm(sentences, desc="  orc eval", leave=False):
             tok, spans = _word_token_spans(sent, tokenizer)
 
-            # Find ablation position: post-rel word
-            rel_idx = find_rel_marker_span_idx(spans)
-            if rel_idx is None or rel_idx + 1 >= len(spans):
+            if find_rel_marker_span_idx(spans) is None:
                 results.append(None)
                 continue
-            _, _, post_rel_end = spans[rel_idx + 1]
-            target_pos[0] = post_rel_end - 1
 
-            # Find ROI: first embedded verb (same logic as eval_test.py)
+            # Find ROI: first embedded verb
             roi_idx = None
             for word, start, end in spans:
                 if normalize_word(word) in roi_verb_set:
@@ -252,7 +247,6 @@ def eval_orc_task(
                 results.append(None)
                 continue
 
-            # Run up to verb; hooks fire at target_pos[0] during attention
             x = torch.tensor(tok[: roi_idx + 1], device=device).unsqueeze(0)
             with torch.no_grad():
                 logits = model(x)[0, -1, :]
@@ -288,18 +282,17 @@ def eval_src_task(
     direct object, so the model should predict 'the' (start of the object NP)
     rather than a main-clause verb continuation.
     Score: the_mass - verb_mass  (positive = model correctly expects an object)
-    Ablation position: same as ORC — the post-relativizer word (the adverb in SRC).
+    Neurons are zeroed at every token position throughout the full forward pass.
     """
     blocks = get_transformer_blocks(model)
     handles: List = []
-    target_pos = [0]
 
     if ablate_dims:
         def make_ablation_hook(layer_idx: int, dims: List[int]):
             def hook(module, inp, out):
                 h = out[0] if isinstance(out, tuple) else out
                 h = h.clone()
-                h[0, target_pos[0], dims] = 0.0
+                h[0, :, dims] = 0.0  # zero at every token position
                 return (h,) + out[1:] if isinstance(out, tuple) else h
             return hook
         for layer_idx, dims in ablate_dims.items():
@@ -317,12 +310,9 @@ def eval_src_task(
         for sent in tqdm(sentences, desc="  src eval", leave=False):
             tok, spans = _word_token_spans(sent, tokenizer)
 
-            rel_idx = find_rel_marker_span_idx(spans)
-            if rel_idx is None or rel_idx + 1 >= len(spans):
+            if find_rel_marker_span_idx(spans) is None:
                 results.append(None)
                 continue
-            _, _, post_rel_end = spans[rel_idx + 1]
-            target_pos[0] = post_rel_end - 1
 
             roi_idx = None
             for word, start, end in spans:
