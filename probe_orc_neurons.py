@@ -263,18 +263,6 @@ def eval_orc_task(
     return results
 
 
-def _bh_fdr(p_vals: np.ndarray) -> np.ndarray:
-    """Benjamini-Hochberg FDR correction. Returns adjusted p-values."""
-    n = len(p_vals)
-    order = np.argsort(p_vals)
-    p_sorted = p_vals[order]
-    p_adj_sorted = p_sorted * n / (np.arange(1, n + 1))
-    # enforce monotonicity right-to-left
-    p_adj_sorted = np.minimum.accumulate(p_adj_sorted[::-1])[::-1]
-    p_adj = np.empty(n)
-    p_adj[order] = np.clip(p_adj_sorted, 0.0, 1.0)
-    return p_adj
-
 
 def eval_src_task(
     model: GPT,
@@ -414,21 +402,23 @@ def main() -> None:
     n_embd    = n_neurons // n_layers
     print(f"  hidden dim per layer: {n_embd}, total neurons: {n_neurons}")
 
-    # ── 2. Paired t-test per neuron + BH FDR correction ──────────────────────
-    print("\n[2/3] Running paired t-tests (ORC vs SRC) with BH FDR correction …")
-    t_stats = np.empty(n_neurons, dtype=np.float64)
-    p_vals  = np.empty(n_neurons, dtype=np.float64)
+    # ── 2. Paired t-test per neuron + Bonferroni correction ────────────────────
+    print("\n[2/3] Running paired t-tests (ORC vs SRC) with Bonferroni correction …")
+    t_stats    = np.empty(n_neurons, dtype=np.float64)
+    p_vals     = np.empty(n_neurons, dtype=np.float64)
+    mean_delta = np.empty(n_neurons, dtype=np.float64)
     for i in range(n_neurons):
         t, p = stats.ttest_rel(orc_acts[:, i], src_acts[:, i])
-        t_stats[i] = t
-        p_vals[i]  = p
+        t_stats[i]    = t
+        p_vals[i]     = p
+        mean_delta[i] = float(np.mean(orc_acts[:, i] - src_acts[:, i]))
 
-    p_vals_fdr     = _bh_fdr(p_vals)
+    p_vals_bonf    = np.clip(p_vals * n_neurons, 0.0, 1.0)
     pos_idx        = np.where(t_stats > 0)[0]
     pos_idx_sorted = pos_idx[np.argsort(t_stats[pos_idx])[::-1]]   # descending by t
-    n_sig = int(np.sum((t_stats > 0) & (p_vals_fdr < 0.05)))
+    n_sig = int(np.sum((t_stats > 0) & (p_vals_bonf < 0.05)))
     print(f"  Neurons with t > 0 (ORC > SRC): {len(pos_idx_sorted)} / {n_neurons}")
-    print(f"  Significant after BH FDR (t > 0, q < 0.05): {n_sig}")
+    print(f"  Significant after Bonferroni (t > 0, p_bonf < 0.05): {n_sig}")
 
     neuron_records = [
         {
@@ -436,8 +426,9 @@ def main() -> None:
             "layer":       int(idx // n_embd),
             "dim":         int(idx % n_embd),
             "t_stat":      float(t_stats[idx]),
+            "mean_delta":  float(mean_delta[idx]),
             "p_value":     float(p_vals[idx]),
-            "p_value_fdr": float(p_vals_fdr[idx]),
+            "p_value_bonf": float(p_vals_bonf[idx]),
         }
         for idx in pos_idx_sorted
     ]
