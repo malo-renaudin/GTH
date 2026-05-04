@@ -110,40 +110,29 @@ def find_rel_marker_span_idx(
     return None
 
 
-def find_post_rel_token_pos(
-    spans: List[Tuple[str, int, int]]
-) -> Optional[int]:
-    """Return the last-token index of the word immediately after 'that'/'who'."""
-    rel_idx = find_rel_marker_span_idx(spans)
-    if rel_idx is None or rel_idx + 1 >= len(spans):
-        return None
-    _, _, end = spans[rel_idx + 1]
-    return end - 1
-
-
 # ── Hidden-state collection ───────────────────────────────────────────────────
 
-def collect_hidden_states(
+def collect_paired_hidden_states(
     model: GPT,
     tokenizer: Tokenizer,
-    sentences: List[str],
+    src_sentences: List[str],
+    orc_sentences: List[str],
     device: torch.device,
-) -> Tuple[np.ndarray, List[Optional[int]]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    For each sentence:
-      1. Find the token position of 'that'/'who'.
-      2. Run the model on tokens[0 : rel_pos + 1].
-      3. Capture every transformer block's output at rel_pos.
+    Collect hidden states at the post-relativizer word for aligned SRC/ORC pairs.
+    Only pairs where both sentences have a valid relativizer are retained,
+    preserving the alignment required for a paired t-test.
 
     Returns:
-      activations  : float32 array, shape (n_valid, n_layers * n_embd)
-      next_tok_ids : first token of the word immediately after the relativizer
+      src_acts : float32 array, shape (n_valid_pairs, n_layers * n_embd)
+      orc_acts : float32 array, shape (n_valid_pairs, n_layers * n_embd)
     """
     blocks = get_transformer_blocks(model)
     n_layers = len(blocks)
 
     layer_captures: List[Optional[torch.Tensor]] = [None] * n_layers
-    target_pos = [0]  # mutable cell updated before each forward pass
+    target_pos = [0]
 
     def make_hook(layer_idx: int):
         def hook(module, inp, out):
@@ -153,119 +142,55 @@ def collect_hidden_states(
 
     handles = [b.register_forward_hook(make_hook(i)) for i, b in enumerate(blocks)]
 
-    all_activations: List[Optional[np.ndarray]] = []
-    next_tok_ids:    List[Optional[int]]         = []
+    def _run_one(tokens: List[int], spans: List[Tuple[str, int, int]]) -> Optional[np.ndarray]:
+        rel_idx = find_rel_marker_span_idx(spans)
+        if rel_idx is None or rel_idx + 1 >= len(spans):
+            return None
+        _, _, probe_end = spans[rel_idx + 1]
+        target_pos[0] = probe_end - 1
+        x = torch.tensor(tokens[: target_pos[0] + 1], device=device).unsqueeze(0)
+        with torch.no_grad():
+            _ = model(x)
+        fallback_dim = next(
+            (layer_captures[i].shape[0] for i in range(n_layers) if layer_captures[i] is not None), 1
+        )
+        return np.concatenate([
+            layer_captures[i].numpy() if layer_captures[i] is not None
+            else np.zeros(fallback_dim, dtype=np.float32)
+            for i in range(n_layers)
+        ])
+
+    src_acts_list: List[np.ndarray] = []
+    orc_acts_list: List[np.ndarray] = []
+    n_skipped = 0
 
     try:
-        for sent in tqdm(sentences, desc="  collecting activations", leave=False):
-            tokens, spans = tokenize_sentence(sent, tokenizer)
-            rel_idx = find_rel_marker_span_idx(spans)
-            if rel_idx is None or rel_idx + 1 >= len(spans):
-                all_activations.append(None)
-                next_tok_ids.append(None)
+        for src_sent, orc_sent in tqdm(
+            zip(src_sentences, orc_sentences), total=len(src_sentences),
+            desc="  collecting paired activations", leave=False,
+        ):
+            src_tokens, src_spans = tokenize_sentence(src_sent, tokenizer)
+            orc_tokens, orc_spans = tokenize_sentence(orc_sent, tokenizer)
+            src_vec = _run_one(src_tokens, src_spans)
+            orc_vec = _run_one(orc_tokens, orc_spans)
+            if src_vec is None or orc_vec is None:
+                n_skipped += 1
                 continue
-
-            # Probe at the word immediately after the relativizer
-            _, _, probe_end = spans[rel_idx + 1]
-            probe_pos = probe_end - 1
-
-            # Next token id: first token of the word two positions after the relativizer
-            next_tok_id = tokens[spans[rel_idx + 2][1]] if rel_idx + 2 < len(spans) else None
-
-            target_pos[0] = probe_pos
-            x = torch.tensor(tokens[: probe_pos + 1], device=device).unsqueeze(0)
-            with torch.no_grad():
-                _ = model(x)
-
-            # Fallback dim in case a layer wasn't triggered (shouldn't happen)
-            fallback_dim = next(
-                (layer_captures[i].shape[0] for i in range(n_layers) if layer_captures[i] is not None),
-                1,
-            )
-            vec = np.concatenate([
-                layer_captures[i].numpy()
-                if layer_captures[i] is not None
-                else np.zeros(fallback_dim, dtype=np.float32)
-                for i in range(n_layers)
-            ])
-            all_activations.append(vec)
-            next_tok_ids.append(next_tok_id)
+            src_acts_list.append(src_vec)
+            orc_acts_list.append(orc_vec)
     finally:
         for h in handles:
             h.remove()
 
-    valid = [(a, t) for a, t in zip(all_activations, next_tok_ids) if a is not None]
-    if not valid:
-        raise ValueError("No 'that'/'who' found in any sentence.")
+    if not src_acts_list:
+        raise ValueError("No valid pairs found (no 'that'/'who' in any sentence).")
+    if n_skipped:
+        print(f"  Warning: {n_skipped} pairs skipped (missing relativizer).")
     return (
-        np.stack([v[0] for v in valid]).astype(np.float32),
-        [v[1] for v in valid],
+        np.stack(src_acts_list).astype(np.float32),
+        np.stack(orc_acts_list).astype(np.float32),
     )
 
-
-# ── Next-token probability (with optional ablation) ───────────────────────────
-
-def collect_next_token_probs(
-    model: GPT,
-    tokenizer: Tokenizer,
-    sentences: List[str],
-    device: torch.device,
-    ablate_dims: Optional[Dict[int, List[int]]] = None,
-) -> List[Optional[float]]:
-    """
-    For each sentence, run the model up to and including the relativizer,
-    optionally zero-out ablate_dims[layer] at that position in each layer's
-    output, and return P(first token of the next word).
-    """
-    blocks = get_transformer_blocks(model)
-    handles: List[torch.utils.hooks.RemovableHook] = []
-    target_pos = [0]
-
-    if ablate_dims:
-        def make_ablation_hook(layer_idx: int, dims: List[int]):
-            def hook(module, inp, out):
-                h = out[0] if isinstance(out, tuple) else out
-                h = h.clone()
-                h[0, target_pos[0], dims] = 0.0
-                return (h,) + out[1:] if isinstance(out, tuple) else h
-            return hook
-
-        for layer_idx, dims in ablate_dims.items():
-            if dims:
-                handles.append(
-                    blocks[layer_idx].register_forward_hook(
-                        make_ablation_hook(layer_idx, dims)
-                    )
-                )
-
-    probs: List[Optional[float]] = []
-    try:
-        for sent in tqdm(sentences, desc="  next-token probs", leave=False):
-            tokens, spans = tokenize_sentence(sent, tokenizer)
-            rel_idx = find_rel_marker_span_idx(spans)
-            if rel_idx is None or rel_idx + 1 >= len(spans):
-                probs.append(None)
-                continue
-
-            _, _, probe_end = spans[rel_idx + 1]
-            probe_pos = probe_end - 1
-
-            if rel_idx + 2 >= len(spans):
-                probs.append(None)
-                continue
-            next_tok_id = tokens[spans[rel_idx + 2][1]]
-
-            target_pos[0] = probe_pos
-            x = torch.tensor(tokens[: probe_pos + 1], device=device).unsqueeze(0)
-            with torch.no_grad():
-                logits = model(x)[0, -1, :]
-            p = torch.softmax(logits, dim=-1)
-            probs.append(p[next_tok_id].item())
-    finally:
-        for h in handles:
-            h.remove()
-
-    return probs
 
 def eval_orc_task(
     model, tokenizer, sentences, device,
@@ -328,14 +253,102 @@ def eval_orc_task(
                 continue
 
             np_lists   = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in np_words]
-            np_mass    = lexical_mass(probs, np_lists) / len(np_lists)
-            verb_mass  = lexical_mass(probs, orc_verb_cont_lists) / len(orc_verb_cont_lists)
+            np_mass    = lexical_mass(probs, np_lists) / max(1, len(np_lists))
+            verb_mass  = lexical_mass(probs, orc_verb_cont_lists) / max(1, len(orc_verb_cont_lists))
             results.append({"np_mass": np_mass, "verb_mass": verb_mass,
                              "np_minus_verb": np_mass - verb_mass})
     finally:
         for h in handles:
             h.remove()
     return results
+
+
+def _bh_fdr(p_vals: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg FDR correction. Returns adjusted p-values."""
+    n = len(p_vals)
+    order = np.argsort(p_vals)
+    p_sorted = p_vals[order]
+    p_adj_sorted = p_sorted * n / (np.arange(1, n + 1))
+    # enforce monotonicity right-to-left
+    p_adj_sorted = np.minimum.accumulate(p_adj_sorted[::-1])[::-1]
+    p_adj = np.empty(n)
+    p_adj[order] = np.clip(p_adj_sorted, 0.0, 1.0)
+    return p_adj
+
+
+def eval_src_task(
+    model: GPT,
+    tokenizer: Tokenizer,
+    sentences: List[str],
+    device: torch.device,
+    ablate_dims: Optional[Dict[int, List[int]]] = None,
+) -> List[Optional[dict]]:
+    """
+    SRC selectivity check at the embedded verb.
+    In SRC the subject slot is filled by the filler; the verb still needs its
+    direct object, so the model should predict 'the' (start of the object NP)
+    rather than a main-clause verb continuation.
+    Score: the_mass - verb_mass  (positive = model correctly expects an object)
+    Ablation position: same as ORC — the post-relativizer word (the adverb in SRC).
+    """
+    blocks = get_transformer_blocks(model)
+    handles: List = []
+    target_pos = [0]
+
+    if ablate_dims:
+        def make_ablation_hook(layer_idx: int, dims: List[int]):
+            def hook(module, inp, out):
+                h = out[0] if isinstance(out, tuple) else out
+                h = h.clone()
+                h[0, target_pos[0], dims] = 0.0
+                return (h,) + out[1:] if isinstance(out, tuple) else h
+            return hook
+        for layer_idx, dims in ablate_dims.items():
+            if dims:
+                handles.append(blocks[layer_idx].register_forward_hook(
+                    make_ablation_hook(layer_idx, dims)))
+
+    roi_verb_set = set(verbs_orc)
+    orc_verb_cont_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist()
+                           for w in verbs_orc_continuation]
+    the_lists = [tokenizer.encode(" the", bos=False, eos=False).tolist()]
+
+    results: List[Optional[dict]] = []
+    try:
+        for sent in tqdm(sentences, desc="  src eval", leave=False):
+            tok, spans = _word_token_spans(sent, tokenizer)
+
+            rel_idx = find_rel_marker_span_idx(spans)
+            if rel_idx is None or rel_idx + 1 >= len(spans):
+                results.append(None)
+                continue
+            _, _, post_rel_end = spans[rel_idx + 1]
+            target_pos[0] = post_rel_end - 1
+
+            roi_idx = None
+            for word, start, end in spans:
+                if normalize_word(word) in roi_verb_set:
+                    roi_idx = end - 1
+                    break
+            if roi_idx is None:
+                results.append(None)
+                continue
+
+            x = torch.tensor(tok[: roi_idx + 1], device=device).unsqueeze(0)
+            with torch.no_grad():
+                logits = model(x)[0, -1, :]
+            probs = torch.softmax(logits, dim=-1)
+
+            the_mass  = lexical_mass(probs, the_lists)
+            verb_mass = lexical_mass(probs, orc_verb_cont_lists) / max(1, len(orc_verb_cont_lists))
+            results.append({"the_mass": the_mass, "verb_mass": verb_mass,
+                             "the_minus_verb": the_mass - verb_mass})
+    finally:
+        for h in handles:
+            h.remove()
+    return results
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -392,36 +405,39 @@ def main() -> None:
     print(f"Model: {n_layers} transformer layers")
 
     # ── 1. Collect hidden states ─────────────────────────────────────────────
-    print("\n[1/3] Collecting hidden states at relativizer position …")
-    print("  SRC:")
-    src_acts, _ = collect_hidden_states(model, tokenizer, src_sents, device)
-    print("  ORC:")
-    orc_acts, _ = collect_hidden_states(model, tokenizer, orc_sents, device)
+    print("\n[1/3] Collecting hidden states at post-relativizer position (paired) …")
+    src_acts, orc_acts = collect_paired_hidden_states(
+        model, tokenizer, src_sents, orc_sents, device
+    )
 
     n_neurons = src_acts.shape[1]
     n_embd    = n_neurons // n_layers
     print(f"  hidden dim per layer: {n_embd}, total neurons: {n_neurons}")
 
-    # ── 2. Welch t-test per neuron ────────────────────────────────────────────
-    print("\n[2/3] Running Welch t-tests (ORC vs SRC) …")
+    # ── 2. Paired t-test per neuron + BH FDR correction ──────────────────────
+    print("\n[2/3] Running paired t-tests (ORC vs SRC) with BH FDR correction …")
     t_stats = np.empty(n_neurons, dtype=np.float64)
     p_vals  = np.empty(n_neurons, dtype=np.float64)
     for i in range(n_neurons):
-        t, p = stats.ttest_ind(orc_acts[:, i], src_acts[:, i], equal_var=False)
+        t, p = stats.ttest_rel(orc_acts[:, i], src_acts[:, i])
         t_stats[i] = t
         p_vals[i]  = p
 
+    p_vals_fdr     = _bh_fdr(p_vals)
     pos_idx        = np.where(t_stats > 0)[0]
     pos_idx_sorted = pos_idx[np.argsort(t_stats[pos_idx])[::-1]]   # descending by t
+    n_sig = int(np.sum((t_stats > 0) & (p_vals_fdr < 0.05)))
     print(f"  Neurons with t > 0 (ORC > SRC): {len(pos_idx_sorted)} / {n_neurons}")
+    print(f"  Significant after BH FDR (t > 0, q < 0.05): {n_sig}")
 
     neuron_records = [
         {
-            "flat_idx": int(idx),
-            "layer":    int(idx // n_embd),
-            "dim":      int(idx % n_embd),
-            "t_stat":   float(t_stats[idx]),
-            "p_value":  float(p_vals[idx]),
+            "flat_idx":    int(idx),
+            "layer":       int(idx // n_embd),
+            "dim":         int(idx % n_embd),
+            "t_stat":      float(t_stats[idx]),
+            "p_value":     float(p_vals[idx]),
+            "p_value_fdr": float(p_vals_fdr[idx]),
         }
         for idx in pos_idx_sorted
     ]
@@ -446,23 +462,28 @@ def main() -> None:
         dim   = int(idx % n_embd)
         ablate_dims.setdefault(layer, []).append(dim)
 
-    print("  Baseline (no ablation):")
-    orc_base = eval_orc_task(model, tokenizer, orc_sents, device)
-
-    print("  Ablated:")
-    orc_ablated = eval_orc_task(model, tokenizer, orc_sents, device, ablate_dims)
-
-    def mean_nonnull_key(lst, key):
+    def mean_nonnull_key(lst: List[Optional[dict]], key: str) -> float:
         v = [x[key] for x in lst if x is not None]
         return float(np.mean(v)) if v else float("nan")
 
+    print("  Baseline (no ablation):")
+    orc_base = eval_orc_task(model, tokenizer, orc_sents, device)
+    src_base = eval_src_task(model, tokenizer, src_sents, device)
+
+    print("  Ablated:")
+    orc_ablated = eval_orc_task(model, tokenizer, orc_sents, device, ablate_dims)
+    src_ablated = eval_src_task(model, tokenizer, src_sents, device, ablate_dims)
+
     orc_b = mean_nonnull_key(orc_base,    "np_minus_verb")
     orc_a = mean_nonnull_key(orc_ablated, "np_minus_verb")
+    src_b = mean_nonnull_key(src_base,    "the_minus_verb")
+    src_a = mean_nonnull_key(src_ablated, "the_minus_verb")
 
-    print("\n=== Ablation results (ORC eval_test task: np_mass - verb_mass) ===")
-    print(f"{'Condition':35s} {'Baseline':>10} {'Ablated':>10} {'Delta':>10}")
-    print(f"{'ORC  np_minus_verb':35s} {orc_b:10.6f} {orc_a:10.6f} {orc_a - orc_b:+10.6f}")
-    print("(negative = model correctly prefers verb continuation over re-using moved NP)")
+    print("\n=== Ablation results ===")
+    print(f"{'Condition':42s} {'Baseline':>10} {'Ablated':>10} {'Delta':>10}")
+    print(f"{'ORC  np_minus_verb   (neg = good)':42s} {orc_b:10.6f} {orc_a:10.6f} {orc_a - orc_b:+10.6f}")
+    print(f"{'SRC  the_minus_verb  (pos = good)':42s} {src_b:10.6f} {src_a:10.6f} {src_a - src_b:+10.6f}")
+    print("Selective ORC neurons: ORC delta >> 0, SRC delta ≈ 0")
 
     ablation_output = args.output.parent / (args.output.stem + "_ablation.json")
     ablation_results = {
@@ -475,6 +496,15 @@ def main() -> None:
             "per_sentence": [
                 {"baseline": b, "ablated": a}
                 for b, a in zip(orc_base, orc_ablated)
+            ],
+        },
+        "src": {
+            "baseline_mean_the_minus_verb": src_b,
+            "ablated_mean_the_minus_verb":  src_a,
+            "delta":                        src_a - src_b,
+            "per_sentence": [
+                {"baseline": b, "ablated": a}
+                for b, a in zip(src_base, src_ablated)
             ],
         },
     }
