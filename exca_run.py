@@ -3,6 +3,7 @@ import argparse
 import csv
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List
@@ -51,6 +52,19 @@ def out_dir_from_config(config_path: Path) -> Path:
     if not out_dir.is_absolute():
         out_dir = config_path.parent / out_dir
     return out_dir
+
+
+def resolve_config_path(config: Path) -> Path:
+    """Allow passing either 'gpt_baseline' or 'gpt_baseline.yaml'."""
+    if config.suffix:
+        return config
+    return config.with_suffix(".yaml")
+
+
+def config_tag(config: Path) -> str:
+    """Turn config names like gpt_baseline.yaml into a short tag like baseline."""
+    stem = resolve_config_path(config).stem
+    return stem[4:] if stem.startswith("gpt_") else stem
 
 
 class EvalCheckpointTask(pydantic.BaseModel):
@@ -237,17 +251,17 @@ class TrainAndEvalTask(pydantic.BaseModel):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train + evaluate checkpoints (ORC and WH) with EXCA.")
-    parser.add_argument("--config", type=Path, default=Path("gpt_baseline.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("gpt_baseline"))
     parser.add_argument("--test-file-orc", type=Path, default=Path("data/valid_orc7_not_in_train_orc_6_72.txt"))
     parser.add_argument("--test-file-wh", type=Path, default=Path("data/valid_wh5_not_in_wh_7_20.txt"))
-    parser.add_argument("--csv-out", type=Path, default=Path("results/eval_baseline.csv"))
+    parser.add_argument("--csv-out", type=Path)
     parser.add_argument("--poll-seconds", type=int, default=30)
-    parser.add_argument("--cache-folder", type=Path, default=Path("results/exca_cache/train_eval_baseline"))
+    parser.add_argument("--cache-folder", type=Path)
 
     # EXCA/submitit infrastructure controls
     parser.add_argument("--cluster", choices=["slurm", "local", "auto", "debug"], default="slurm")
     parser.add_argument("--infra-mode", choices=["cached", "retry", "force", "read-only"], default="retry")
-    parser.add_argument("--job-name", type=str, default="gpt_baseline")
+    parser.add_argument("--job-name", type=str)
     parser.add_argument("--logs", type=str, default="outputs/gpt/%j")
     parser.add_argument("--gpus-per-node", type=int, default=1)
     parser.add_argument("--cpus-per-task", type=int, default=4)
@@ -257,7 +271,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slurm-qos", type=str, default="qos_gpu_h100-dev")
     parser.add_argument("--slurm-constraint", type=str, default="h100")
     parser.add_argument("--mail-user", type=str, default="malorenaudin1@gmail.com")
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Normalize config path first so both gpt_baseline and gpt_baseline.yaml work.
+    args.config = resolve_config_path(args.config)
+    tag = config_tag(args.config)
+    argv = sys.argv[1:]
+
+    if "--csv-out" not in argv:
+        args.csv_out = Path(f"results/eval_{tag}.csv")
+    if "--cache-folder" not in argv:
+        args.cache_folder = Path(f"results/exca_cache/train_eval_{tag}")
+    if "--job-name" not in argv:
+        args.job_name = f"gpt_{tag}"
+
+    return args
 
 
 def build_main_infra(args: argparse.Namespace) -> Dict:
