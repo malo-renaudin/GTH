@@ -154,6 +154,7 @@ class TrainTask(pydantic.BaseModel):
             str(self.config),
         ]
         proc = subprocess.Popen(cmd)
+        print(f"[train] launched: {' '.join(cmd)} (pid={proc.pid})")
         return {"pid": proc.pid, "out_dir": str(self.out_dir)}
 
 
@@ -234,6 +235,11 @@ class TrainAndEvalTask(pydantic.BaseModel):
             # break condition: training ended and no new ckpt left
             ret = proc.poll()
             if ret is not None:
+                if ret != 0:
+                    raise RuntimeError(
+                        "Training process exited with non-zero status "
+                        f"{ret}. Check Slurm logs in {self.infra.logs}."
+                    )
                 ckpts_after = list_step_checkpoints(out_dir)
                 remaining = [c for c in ckpts_after if step_from_checkpoint(c) not in evaluated_steps]
                 if not remaining:
@@ -262,7 +268,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cluster", choices=["slurm", "local", "auto", "debug"], default="slurm")
     parser.add_argument("--infra-mode", choices=["cached", "retry", "force", "read-only"], default="retry")
     parser.add_argument("--job-name", type=str)
-    parser.add_argument("--logs", type=str, default="outputs/gpt/%j")
+    parser.add_argument("--logs", type=str)
     parser.add_argument("--gpus-per-node", type=int, default=1)
     parser.add_argument("--cpus-per-task", type=int, default=4)
     parser.add_argument("--timeout-min", type=int, default=120)
@@ -284,6 +290,8 @@ def parse_args() -> argparse.Namespace:
         args.cache_folder = Path(f"results/exca_cache/train_eval_{tag}")
     if "--job-name" not in argv:
         args.job_name = f"gpt_{tag}"
+    if "--logs" not in argv:
+        args.logs = f"outputs/gpt_{tag}/%j"
 
     return args
 
