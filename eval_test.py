@@ -242,8 +242,10 @@ def compute_one_checkpoint(
             t_label, c_label = "moved_np_mass", "verb_mass"
         else:
             # WH: sum probability for all WH NPs, compare to question mark.
-            # target_minus_comparator < 0 means model correctly prefers ")" over NP filler
-            # (gap is filled by the fronted WH phrase), i.e. the model understands WH movement.
+            # target_minus_comparator < 0 means the model understands WH movement:
+            # it prefers "?" over an NP filler because the gap is already filled by the fronted WH phrase.
+            # Same direction as ORC: for ORC, target_minus_comparator < 0 means the model prefers
+            # verb continuation over the moved NP, i.e. it knows the object gap is already filled.
             target = lexical_mass(probs, wh_np_vocab_lists)
             target_head = lexical_mass(probs, wh_noun_lists)  # noun-only mass (parallel to ORC head)
             comp = lexical_mass(probs, [sorted(qmark)])  # treat all ?-token variants as one group
