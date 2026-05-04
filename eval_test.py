@@ -1,6 +1,7 @@
 import argparse
 import csv
 from concurrent.futures import ProcessPoolExecutor
+import itertools
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -11,17 +12,26 @@ from litgpt import Tokenizer
 from litgpt.config import Config
 from litgpt.model import GPT
 
-nouns_orc = ["boy", "student", "doctor", "artist", "athlete", "girl", "child", "pilot", "scientist", "engineer"]
-nouns_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist", "child", "girl", "boy", "patient", "client", "tourist"]
-verbs_orc = ["visits", "visit", "helps", "help", "avoids", "avoid", "follows", "follow", "greets", "greet"]
+nouns_orc = ["boy", "boys","student", "students","doctor", "doctors", "artist","artists", "athlete", "athletes", "girl", "girls", "child", "children", "pilot", "pilots", "scientist", "scientists", "engineer", "engineers"]
+# nouns_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist", "child", "girl", "boy", "patient", "client", "tourist"]
+n1_opts_wh = ["student", "doctor", "pilot", "officer", "athlete",
+           "artist"]
+n2_opts_wh = ["child", "girl", "boy", "patient", "client", 
+           "tourist"]
+adj1_opts = ["young", "tall", "smart", "brave", "kind", 
+             "famous"]
+adj2_opts = ["creative", "serious", "friendly", "quiet", "active"] 
+           
+np_wh = [itertools.product(n1_opts_wh, adj1_opts), itertools.product(n2_opts_wh, adj2_opts)]
+
+verbs_orc = ["is", "are", "likes", "like", "enjoys", "enjoy"]
 verbs_wh = [
     "visit", "visited", "visiting", "help", "helped", "helping", "greet", "greeted", "greeting",
     "follow", "followed", "following", "avoid", "avoided", "avoiding", "call", "called", "calling",
     "observe", "observed", "observing",
 ]
 
-ORC_REL_MARKERS = {"that", "who"}
-IRREGULAR_PLURALS = {"child": "children", "man": "men", "woman": "women"}
+ORC_REL_MARKERS = {"that", "who", "the"}#peut etre qu'il faut ajouter the ici
 CSV_FIELDS = [
     "step",
     "structure",
@@ -106,6 +116,11 @@ def extract_orc_moved_np(sentence: str, noun_forms_orc: Set[str]) -> Tuple[List[
     Extract the moved NP (surface string) from an ORC sentence.
     Returns the list of words in the NP and the head noun.
     """
+    # Guard against accidental determiners in noun vocabulary.
+    noun_candidates = {
+        normalize_word(w) for w in noun_forms_orc if normalize_word(w) not in {"the", "a", "an"}
+    }
+
     words = sentence.split()
     if not words or normalize_word(words[0]) != "the":
         return [], None
@@ -115,7 +130,7 @@ def extract_orc_moved_np(sentence: str, noun_forms_orc: Set[str]) -> Tuple[List[
         w = normalize_word(words[i])
         if w in ORC_REL_MARKERS:
             break
-        if w in noun_forms_orc:
+        if w in noun_candidates:
             head_idx = i
             break
 
@@ -151,8 +166,8 @@ def compute_one_checkpoint(
 
     orc_verb_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc]
     wh_np_vocab_lists = [
-        tokenizer.encode(" " + w, bos=False, eos=False).tolist()
-        for w in sorted(nouns_wh)
+        tokenizer.encode(" " + " ".join(w), bos=False, eos=False).tolist()
+        for w in sorted(np_wh)
     ]
     # Get all token ids for question mark (with and without leading space)
     qmark: Set[int] = set()
