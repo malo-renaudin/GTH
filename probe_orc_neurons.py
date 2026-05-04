@@ -120,9 +120,12 @@ def collect_paired_hidden_states(
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Collect hidden states at the post-relativizer word for aligned SRC/ORC pairs.
-    Only pairs where both sentences have a valid relativizer are retained,
-    preserving the alignment required for a paired t-test.
+    Collect hidden states at the embedded verb position for aligned SRC/ORC pairs.
+    The embedded verb is the same lexical item in both conditions (minimal pairs),
+    so hidden-state differences reflect structural context (filled vs. unfilled gap),
+    not token-identity differences.
+    Only pairs where both sentences have a valid relativizer and an embedded verb
+    are retained, preserving alignment for the paired t-test.
 
     Returns:
       src_acts : float32 array, shape (n_valid_pairs, n_layers * n_embd)
@@ -130,6 +133,7 @@ def collect_paired_hidden_states(
     """
     blocks = get_transformer_blocks(model)
     n_layers = len(blocks)
+    roi_verb_set = set(verbs_orc)
 
     layer_captures: List[Optional[torch.Tensor]] = [None] * n_layers
     target_pos = [0]
@@ -143,11 +147,18 @@ def collect_paired_hidden_states(
     handles = [b.register_forward_hook(make_hook(i)) for i, b in enumerate(blocks)]
 
     def _run_one(tokens: List[int], spans: List[Tuple[str, int, int]]) -> Optional[np.ndarray]:
-        rel_idx = find_rel_marker_span_idx(spans)
-        if rel_idx is None or rel_idx + 1 >= len(spans):
+        # Require a relativizer
+        if find_rel_marker_span_idx(spans) is None:
             return None
-        _, _, probe_end = spans[rel_idx + 1]
-        target_pos[0] = probe_end - 1
+        # Probe position: last token of the embedded verb
+        roi_idx = None
+        for word, start, end in spans:
+            if normalize_word(word) in roi_verb_set:
+                roi_idx = end - 1
+                break
+        if roi_idx is None:
+            return None
+        target_pos[0] = roi_idx
         x = torch.tensor(tokens[: target_pos[0] + 1], device=device).unsqueeze(0)
         with torch.no_grad():
             _ = model(x)
@@ -393,7 +404,7 @@ def main() -> None:
     print(f"Model: {n_layers} transformer layers")
 
     # ── 1. Collect hidden states ─────────────────────────────────────────────
-    print("\n[1/3] Collecting hidden states at post-relativizer position (paired) …")
+    print("\n[1/3] Collecting hidden states at embedded verb position (paired) …")
     src_acts, orc_acts = collect_paired_hidden_states(
         model, tokenizer, src_sents, orc_sents, device
     )
