@@ -35,6 +35,10 @@ from litgpt import Tokenizer
 from litgpt.config import Config
 from litgpt.model import GPT
 
+from eval_test import (
+    _word_token_spans, lexical_mass, extract_orc_moved_np,
+    nouns_orc, verbs_orc, verbs_orc_continuation,
+)
 REL_MARKERS = {"that", "who"}
 
 
@@ -263,7 +267,75 @@ def collect_next_token_probs(
 
     return probs
 
+def eval_orc_task(
+    model, tokenizer, sentences, device,
+    ablate_dims=None,
+):
+    blocks = get_transformer_blocks(model)
+    handles = []
+    target_pos = [0]
 
+    if ablate_dims:
+        def make_ablation_hook(layer_idx, dims):
+            def hook(module, inp, out):
+                h = out[0] if isinstance(out, tuple) else out
+                h = h.clone()
+                h[0, target_pos[0], dims] = 0.0
+                return (h,) + out[1:] if isinstance(out, tuple) else h
+            return hook
+        for layer_idx, dims in ablate_dims.items():
+            if dims:
+                handles.append(blocks[layer_idx].register_forward_hook(
+                    make_ablation_hook(layer_idx, dims)))
+
+    roi_verb_set = set(verbs_orc)
+    orc_verb_cont_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist()
+                           for w in verbs_orc_continuation]
+    noun_forms = set(nouns_orc)
+
+    results = []
+    try:
+        for sent in tqdm(sentences, desc="  orc eval", leave=False):
+            tok, spans = _word_token_spans(sent, tokenizer)
+
+            # Find ablation position: post-rel word
+            rel_idx = find_rel_marker_span_idx(spans)
+            if rel_idx is None or rel_idx + 1 >= len(spans):
+                results.append(None)
+                continue
+            _, _, post_rel_end = spans[rel_idx + 1]
+            target_pos[0] = post_rel_end - 1
+
+            # Find ROI: first embedded verb (same logic as eval_test.py)
+            roi_idx = None
+            for word, start, end in spans:
+                if normalize_word(word) in roi_verb_set:
+                    roi_idx = end - 1
+                    break
+            if roi_idx is None:
+                results.append(None)
+                continue
+
+            # Run up to verb; hooks fire at target_pos[0] during attention
+            x = torch.tensor(tok[: roi_idx + 1], device=device).unsqueeze(0)
+            with torch.no_grad():
+                logits = model(x)[0, -1, :]
+            probs = torch.softmax(logits, dim=-1)
+
+            np_words, head = extract_orc_moved_np(sent, noun_forms)
+            if not np_words or head is None:
+                results.append(None)
+                continue
+
+            np_lists   = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in np_words]
+            np_mass    = lexical_mass(probs, np_lists) / len(np_lists)
+            verb_mass  = lexical_mass(probs, orc_verb_cont_lists) / len(orc_verb_cont_lists)
+            results.append({"np_mass": np_mass, "verb_mass": verb_mass,
+                             "np_minus_verb": np_mass - verb_mass})
+    finally:
+        for h in handles:
+            h.remove()
+    return results
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -375,45 +447,34 @@ def main() -> None:
         ablate_dims.setdefault(layer, []).append(dim)
 
     print("  Baseline (no ablation):")
-    orc_base = collect_next_token_probs(model, tokenizer, orc_sents, device)
-    src_base = collect_next_token_probs(model, tokenizer, src_sents, device)
+    orc_base = eval_orc_task(model, tokenizer, orc_sents, device)
 
     print("  Ablated:")
-    orc_ablated = collect_next_token_probs(model, tokenizer, orc_sents, device, ablate_dims)
-    src_ablated = collect_next_token_probs(model, tokenizer, src_sents, device, ablate_dims)
+    orc_ablated = eval_orc_task(model, tokenizer, orc_sents, device, ablate_dims)
 
-    def mean_nonnull(lst: List[Optional[float]]) -> float:
-        v = [x for x in lst if x is not None]
+    def mean_nonnull_key(lst, key):
+        v = [x[key] for x in lst if x is not None]
         return float(np.mean(v)) if v else float("nan")
 
-    orc_b, orc_a = mean_nonnull(orc_base), mean_nonnull(orc_ablated)
-    src_b, src_a = mean_nonnull(src_base), mean_nonnull(src_ablated)
+    orc_b = mean_nonnull_key(orc_base,    "np_minus_verb")
+    orc_a = mean_nonnull_key(orc_ablated, "np_minus_verb")
 
-    print("\n=== Ablation results ===")
-    print(f"{'Condition':30s} {'Baseline':>10} {'Ablated':>10} {'Delta':>10}")
-    print(f"{'ORC  P(next word)':30s} {orc_b:10.6f} {orc_a:10.6f} {orc_a - orc_b:+10.6f}")
-    print(f"{'SRC  P(next word)':30s} {src_b:10.6f} {src_a:10.6f} {src_a - src_b:+10.6f}")
+    print("\n=== Ablation results (ORC eval_test task: np_mass - verb_mass) ===")
+    print(f"{'Condition':35s} {'Baseline':>10} {'Ablated':>10} {'Delta':>10}")
+    print(f"{'ORC  np_minus_verb':35s} {orc_b:10.6f} {orc_a:10.6f} {orc_a - orc_b:+10.6f}")
+    print("(negative = model correctly prefers verb continuation over re-using moved NP)")
 
     ablation_output = args.output.parent / (args.output.stem + "_ablation.json")
     ablation_results = {
         "n_ablated_neurons": n_top,
         "top_pct":           args.top_pct,
         "orc": {
-            "baseline_mean_prob": orc_b,
-            "ablated_mean_prob":  orc_a,
-            "delta":              orc_a - orc_b,
+            "baseline_mean_np_minus_verb": orc_b,
+            "ablated_mean_np_minus_verb":  orc_a,
+            "delta":                       orc_a - orc_b,
             "per_sentence": [
                 {"baseline": b, "ablated": a}
                 for b, a in zip(orc_base, orc_ablated)
-            ],
-        },
-        "src": {
-            "baseline_mean_prob": src_b,
-            "ablated_mean_prob":  src_a,
-            "delta":              src_a - src_b,
-            "per_sentence": [
-                {"baseline": b, "ablated": a}
-                for b, a in zip(src_base, src_ablated)
             ],
         },
     }
