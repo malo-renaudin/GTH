@@ -12,6 +12,18 @@ import exca as xk
 
 
 REPO_ROOT = Path(__file__).resolve().parent
+EVAL_FIELDS = [
+    "step",
+    "structure",
+    "target_label",
+    "comparator_label",
+    "target_mass",
+    "target_head_mass",
+    "comparator_mass",
+    "target_minus_comparator",
+    "roi_count",
+    "checkpoint",
+]
 
 
 def list_step_checkpoints(out_dir: Path) -> List[Path]:
@@ -100,16 +112,16 @@ class EvalCheckpointTask(pydantic.BaseModel):
         if row is None:
             raise RuntimeError(f"eval_test.py produced no output for checkpoint {checkpoint}")
 
-        noun_mass = float(row["noun_mass"])
-        verb_mass = float(row["verb_mass"])
-        roi_count = int(row["roi_count"])
-
         return {
             "step": step,
-            "test_dataset": self.structure,
-            "noun_mass": noun_mass,
-            "verb_mass": verb_mass,
-            "roi_count": roi_count,
+            "structure": row["structure"],
+            "target_label": row["target_label"],
+            "comparator_label": row["comparator_label"],
+            "target_mass": float(row["target_mass"]),
+            "target_head_mass": float(row["target_head_mass"]),
+            "comparator_mass": float(row["comparator_mass"]),
+            "target_minus_comparator": float(row["target_minus_comparator"]),
+            "roi_count": int(row["roi_count"]),
             "checkpoint": str(self.checkpoint),
         }
 
@@ -150,7 +162,7 @@ class TrainAndEvalTask(pydantic.BaseModel):
             with self.csv_out.open("w", newline="", encoding="utf-8") as f:
                 w = csv.DictWriter(
                     f,
-                    fieldnames=["step", "test_dataset", "noun_mass", "verb_mass", "roi_count", "checkpoint"],
+                    fieldnames=EVAL_FIELDS,
                 )
                 w.writeheader()
 
@@ -189,12 +201,18 @@ class TrainAndEvalTask(pydantic.BaseModel):
                     with self.csv_out.open("a", newline="", encoding="utf-8") as f:
                         w = csv.DictWriter(
                             f,
-                            fieldnames=["step", "test_dataset", "noun_mass", "verb_mass", "roi_count", "checkpoint"],
+                            fieldnames=EVAL_FIELDS,
                         )
                         w.writerow(row)
 
                     rows_written += 1
-                    print(f"[eval] step={step} structure={structure} noun={row['noun_mass']:.6f} verb={row['verb_mass']:.6f} roi_count={row.get('roi_count', 0)}")
+                    print(
+                        f"[eval] step={step} structure={structure} "
+                        f"{row['target_label']}={row['target_mass']:.6f} "
+                        f"head={row['target_head_mass']:.6f} "
+                        f"{row['comparator_label']}={row['comparator_mass']:.6f} "
+                        f"roi_count={row['roi_count']}"
+                    )
 
                 # Mark this step as evaluated after both structures are done
                 evaluated_steps.add(step)
