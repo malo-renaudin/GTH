@@ -12,31 +12,50 @@ from litgpt import Tokenizer
 from eval_test import load_checkpoint, resolve_checkpoint_file, step_from_checkpoint
 
 
-def compute_gap_surprisals(
-    pre_gap: str, post_gap: str, model, tokenizer, device
-) -> Tuple[float, float]:
+def compute_gap_surprisals_batch(
+    items: List[Tuple[str, str]],
+    model, tokenizer, device, batch_size: int = 32,
+) -> List[Tuple[float, float]]:
     """
-    Run model on pre_gap context and return surprisal of post_gap tokens.
-    Returns (surprisal_first_token, mean_surprisal_all_tokens).
+    Batched version: given a list of (pre_gap, post_gap) pairs, return
+    [(surprisal_first, surprisal_mean), ...] for each pair.
     """
-    context_ids = tokenizer.encode(pre_gap, bos=False, eos=False).tolist()
-    suffix_ids = tokenizer.encode(" " + post_gap, bos=False, eos=False).tolist()
+    results = []
 
-    if not suffix_ids:
-        return float("nan"), float("nan")
+    for start in range(0, len(items), batch_size):
+        batch = items[start : start + batch_size]
 
-    all_ids = context_ids + suffix_ids
-    x = torch.tensor(all_ids, device=device).unsqueeze(0)
-    with torch.no_grad():
-        logits = model(x)
-    log_probs = torch.log_softmax(logits[0], dim=-1)
+        encoded = []
+        for pre_gap, post_gap in batch:
+            context_ids = tokenizer.encode(pre_gap, bos=False, eos=False).tolist()
+            suffix_ids  = tokenizer.encode(" " + post_gap, bos=False, eos=False).tolist()
+            encoded.append((context_ids, suffix_ids))
 
-    context_len = len(context_ids)
-    surprisals = [
-        -log_probs[context_len - 1 + i, tok_id].item()
-        for i, tok_id in enumerate(suffix_ids)
-    ]
-    return surprisals[0], sum(surprisals) / len(surprisals)
+        max_len = max(len(c) + len(s) for c, s in encoded)
+        pad_id  = 0
+
+        padded = [
+            c + s + [pad_id] * (max_len - len(c) - len(s))
+            for c, s in encoded
+        ]
+        x = torch.tensor(padded, device=device)  # (B, max_len)
+
+        with torch.no_grad():
+            logits = model(x)  # (B, max_len, vocab)
+        log_probs = torch.log_softmax(logits, dim=-1)  # (B, max_len, vocab)
+
+        for i, (context_ids, suffix_ids) in enumerate(encoded):
+            if not suffix_ids:
+                results.append((float("nan"), float("nan")))
+                continue
+            context_len = len(context_ids)
+            surprisals = [
+                -log_probs[i, context_len - 1 + j, tok_id].item()
+                for j, tok_id in enumerate(suffix_ids)
+            ]
+            results.append((surprisals[0], sum(surprisals) / len(surprisals)))
+
+    return results
 
 
 def _mean(lst: List[float]) -> float:
@@ -58,34 +77,44 @@ def print_metrics(results: List[dict], surprisal_col: str, label: str) -> None:
     s_f1g0 = s.get((1, 0), float("nan"))
 
     diff_gap    = s_f0g1 - s_f1g1
-    diff_nogap  = s_f0g0 - s_f1g0
+    diff_nogap  = s_f1g0 - s_f0g0 
     interaction = diff_gap - diff_nogap
 
     print(f"\n  [{label}]")
     print(f"  surp(filler=0,gap=1) - surp(filler=1,gap=1) = {diff_gap:+.4f}  "
           f"({s_f0g1:.4f} - {s_f1g1:.4f})")
-    print(f"  surp(filler=0,gap=0) - surp(filler=1,gap=0) = {diff_nogap:+.4f}  "
-          f"({s_f0g0:.4f} - {s_f1g0:.4f})")
+    print(f"  surp(filler=1,gap=0) - surp(filler=0,gap=0) = {diff_nogap:+.4f}  "
+          f"({s_f1g0:.4f} - {s_f0g0:.4f})")
     print(f"  Interaction (gap_diff - nogap_diff)          = {interaction:+.4f}")
 
 
 def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
-                   max_seq_length: int, device: torch.device) -> List[dict]:
+                   max_seq_length: int, device: torch.device,
+                   batch_size: int = 32) -> List[dict]:
     step = step_from_checkpoint(ckpt_file)
     print(f"\n=== step {step} ===")
     model = load_checkpoint(ckpt_file, device, max_seq_length)
 
-    results = []
-    for row in tqdm(rows, desc="  sentences", leave=False):
-        pre_gap = row["pre_gap_text"]
+    # Resolve post_gap for rows where it's empty (wh +gap: derive from sentence)
+    items = []
+    for row in rows:
+        pre_gap  = row["pre_gap_text"]
         post_gap = row["post_gap_text"]
         if not post_gap:
-            # Derive suffix from sentence (e.g. "?" for wh +gap)
             post_gap = row["sentence"][len(pre_gap):].strip()
+        items.append((pre_gap, post_gap))
 
-        s_first, s_mean = compute_gap_surprisals(pre_gap, post_gap, model, tokenizer, device)
-        results.append({**row, "step": step, "surprisal_first": round(s_first, 6),
-                        "surprisal_mean": round(s_mean, 6)})
+    surprisals = []
+    for start in tqdm(range(0, len(items), batch_size), desc="  batches", leave=False):
+        batch_items = items[start : start + batch_size]
+        surprisals.extend(compute_gap_surprisals_batch(batch_items, model, tokenizer, device, batch_size))
+
+    results = [
+        {**row, "step": step,
+         "surprisal_first": round(s_first, 6),
+         "surprisal_mean":  round(s_mean,  6)}
+        for row, (s_first, s_mean) in zip(rows, surprisals)
+    ]
 
     del model
     if device.type == "cuda":
@@ -108,6 +137,7 @@ def main() -> None:
                    help="filler_gap_factorial.csv or wh_movement_factorial.csv")
     p.add_argument("--output-csv", type=Path, required=True)
     p.add_argument("--max-seq-length", type=int, default=0)
+    p.add_argument("--batch-size", type=int, default=32)
     args = p.parse_args()
 
     with open(args.input_csv, newline="") as f:
@@ -130,7 +160,7 @@ def main() -> None:
 
     all_results = []
     for ckpt_file in ckpts:
-        all_results.extend(run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device))
+        all_results.extend(run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device, args.batch_size))
 
     out_fields = input_fields + ["step", "surprisal_first", "surprisal_mean"]
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
