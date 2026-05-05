@@ -78,14 +78,14 @@ def print_metrics(results: List[dict], surprisal_col: str, label: str) -> None:
 
     diff_gap    = s_f0g1 - s_f1g1
     diff_nogap  = s_f1g0 - s_f0g0 
-    interaction = diff_gap - diff_nogap
+    interaction = diff_gap + diff_nogap
 
     print(f"\n  [{label}]")
     print(f"  surp(filler=0,gap=1) - surp(filler=1,gap=1) = {diff_gap:+.4f}  "
           f"({s_f0g1:.4f} - {s_f1g1:.4f})")
     print(f"  surp(filler=1,gap=0) - surp(filler=0,gap=0) = {diff_nogap:+.4f}  "
           f"({s_f1g0:.4f} - {s_f0g0:.4f})")
-    print(f"  Interaction (gap_diff - nogap_diff)          = {interaction:+.4f}")
+    print(f"  Interaction (gap_diff + nogap_diff)          = {interaction:+.4f}")
 
 
 def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
