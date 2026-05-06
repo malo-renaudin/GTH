@@ -205,6 +205,19 @@ def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
 
     print_metrics(results, "surprisal_first", "surprisal_first")
     print_metrics(results, "surprisal_mean",  "surprisal_mean")
+
+    df = pd.DataFrame(results)
+    df["filler"] = df["filler"].astype(int)
+    df["gap"]    = df["gap"].astype(int)
+    for col in ("surprisal_first", "surprisal_mean"):
+        lme = _run_lme_one_step(step, df, surprisal_col=col)
+        print(f"\n[LME {col}] step={step}  n_obs={lme['n_obs']}  n_items={lme['n_items']}  converged={lme['converged']}")
+        print(f"  licensing_interaction = {lme['licensing_interaction']:+.4f}  "
+              f"[{lme['interaction_ci_low']:+.4f}, {lme['interaction_ci_high']:+.4f}]  "
+              f"p={lme['p_interaction']:.4f}")
+        print(f"  ML interaction        = {lme['ml_interaction']:+.4f}  "
+              f"[{lme['ml_interaction_ci_low']:+.4f}, {lme['ml_interaction_ci_high']:+.4f}]")
+
     return results
 
 
@@ -244,20 +257,6 @@ def main() -> None:
     all_results = []
     for ckpt_file in ckpts:
         all_results.extend(run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device, args.batch_size))
-
-    if args.checkpoint is not None and all_results:
-        df = pd.DataFrame(all_results)
-        df["filler"] = df["filler"].astype(int)
-        df["gap"] = df["gap"].astype(int)
-        step = all_results[0]["step"]
-        for col in ("surprisal_first", "surprisal_mean"):
-            lme = _run_lme_one_step(step, df, surprisal_col=col)
-            print(f"\n[LME {col}] step={step}  n_obs={lme['n_obs']}  n_items={lme['n_items']}  converged={lme['converged']}")
-            print(f"  licensing_interaction = {lme['licensing_interaction']:+.4f}  "
-                  f"[{lme['interaction_ci_low']:+.4f}, {lme['interaction_ci_high']:+.4f}]  "
-                  f"p={lme['p_interaction']:.4f}")
-            print(f"  ML interaction        = {lme['ml_interaction']:+.4f}  "
-                  f"[{lme['ml_interaction_ci_low']:+.4f}, {lme['ml_interaction_ci_high']:+.4f}]")
 
     out_fields = input_fields + ["step", "surprisal_first", "surprisal_mean"]
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
