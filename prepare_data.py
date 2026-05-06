@@ -10,16 +10,16 @@ def parse_txt(file_path):
         for line in f:
             text = line.strip()
             if text:
-                # Tokenize the line and yield the input_ids
                 yield tokenizer.encode(text)
 
-# 2. Optimize and Chunk
-# This will find all .txt files in your folder and create optimized chunks
-files = glob.glob("train_data/baseline/*.txt")
+# This block is CRITICAL for multiprocessing
+if __name__ == "__main__":
+    # 2. Optimize and Chunk
+    files = glob.glob("train_data/baseline/*.txt")
 
-optimize(
-    fn=parse_txt,
-    inputs=files,
-    output_dir="data/optimized_baseline",
-    chunk_size="64MB", # This prevents the 459MB warning you saw!
-)
+    optimize(
+        fn=parse_txt,
+        inputs=files,
+        output_dir="data/optimized_baseline",
+        chunk_size="64MB",
+    )
