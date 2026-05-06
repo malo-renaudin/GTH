@@ -1,9 +1,14 @@
 import argparse
 import csv
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import List, Tuple
 
+import numpy as np
+import pandas as pd
+from scipy import stats
+import statsmodels.formula.api as smf
 import torch
 from tqdm import tqdm
 
@@ -87,7 +92,85 @@ def print_metrics(results: List[dict], surprisal_col: str, label: str) -> None:
           f"({s_f1g0:.4f} - {s_f0g0:.4f})")
     print(f"  Interaction (gap_diff + nogap_diff)          = {interaction:+.4f}")
 
+def _run_lme_one_step(step, df, surprisal_col="surprisal_first"):
+    """Worker: fit LME for one step. Returns a dict of results."""
+    # step, df_step, surprisal_col = args
+    data = df.copy()
+    data["filler_c"] = data["filler"].map({0: -0.5, 1: 0.5})
+    data["gap_c"]    = data["gap"].map({0: -0.5, 1: 0.5})
 
+    # Raw surprisal as DV; random intercepts by item capture item-level variance
+    formula = f"{surprisal_col} ~ filler_c * gap_c"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = smf.mixedlm(formula, data, groups=data["quadruplet_id"]).fit(reml=True)
+
+    params = result.params
+    pvalues = result.pvalues
+    conf = result.conf_int()
+
+    # --- Masson & Loftus (2003) CIs ---
+    # Subtract by-item means to remove item-level variance, then compute
+    # condition means and CIs from the within-item variance only.
+    item_means = data.groupby("quadruplet_id")[surprisal_col].transform("mean")
+    data["ml_centered"] = data[surprisal_col] - item_means
+
+    data["condition"] = (
+        data["filler"].map({0: "no_wh", 1: "wh"})
+        + "_"
+        + data["gap"].map({0: "no_gap", 1: "gap"})
+    )
+    wide = data.pivot_table(
+        index="quadruplet_id", columns="condition", values="ml_centered"
+    )
+    n_items = len(wide)
+    t_crit = stats.t.ppf(0.975, df=n_items - 1)
+
+    def _se(x):
+        return x.std(ddof=1) / np.sqrt(len(x))
+
+    # Per-item licensing interaction: (wh_no_gap - no_wh_no_gap) - (wh_gap - no_wh_gap)
+    per_item_int = (
+        (wide["wh_no_gap"] - wide["no_wh_no_gap"])
+        - (wide["wh_gap"]  - wide["no_wh_gap"])
+    )
+    ml_int_mean = per_item_int.mean()
+    ml_int_se   = _se(per_item_int)
+
+    return {
+        "step": step,
+        "n_obs": len(data),
+        "n_items": n_items,
+        # fixed effects
+        "intercept":          params["Intercept"],
+        "filler_c":           params["filler_c"],
+        "gap_c":              params["gap_c"],
+        "filler_c:gap_c":     params["filler_c:gap_c"],
+        # licensing interaction = -beta(filler_c:gap_c) with ±0.5 coding
+        "licensing_interaction": -params["filler_c:gap_c"],
+        # p-values
+        "p_filler_c":         pvalues["filler_c"],
+        "p_gap_c":            pvalues["gap_c"],
+        "p_interaction":      pvalues["filler_c:gap_c"],
+        # 95% CI on the interaction from LME (flipped for licensing direction)
+        "interaction_ci_low":  -conf.loc["filler_c:gap_c", 1],
+        "interaction_ci_high": -conf.loc["filler_c:gap_c", 0],
+        "converged": result.converged,
+        # Masson & Loftus (2003): condition means and SEs (from within-item variance)
+        "ml_mean_wh_gap":       wide["wh_gap"].mean(),
+        "ml_mean_wh_no_gap":    wide["wh_no_gap"].mean(),
+        "ml_mean_no_wh_gap":    wide["no_wh_gap"].mean(),
+        "ml_mean_no_wh_no_gap": wide["no_wh_no_gap"].mean(),
+        "ml_se_wh_gap":         _se(wide["wh_gap"]),
+        "ml_se_wh_no_gap":      _se(wide["wh_no_gap"]),
+        "ml_se_no_wh_gap":      _se(wide["no_wh_gap"]),
+        "ml_se_no_wh_no_gap":   _se(wide["no_wh_no_gap"]),
+        # Masson & Loftus CI on the licensing interaction contrast
+        "ml_interaction":          ml_int_mean,
+        "ml_interaction_ci_low":   ml_int_mean - t_crit * ml_int_se,
+        "ml_interaction_ci_high":  ml_int_mean + t_crit * ml_int_se,
+    }
+    
 def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
                    max_seq_length: int, device: torch.device,
                    batch_size: int = 32) -> List[dict]:
@@ -161,6 +244,20 @@ def main() -> None:
     all_results = []
     for ckpt_file in ckpts:
         all_results.extend(run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device, args.batch_size))
+
+    if args.checkpoint is not None and all_results:
+        df = pd.DataFrame(all_results)
+        df["filler"] = df["filler"].astype(int)
+        df["gap"] = df["gap"].astype(int)
+        step = all_results[0]["step"]
+        for col in ("surprisal_first", "surprisal_mean"):
+            lme = _run_lme_one_step(step, df, surprisal_col=col)
+            print(f"\n[LME {col}] step={step}  n_obs={lme['n_obs']}  n_items={lme['n_items']}  converged={lme['converged']}")
+            print(f"  licensing_interaction = {lme['licensing_interaction']:+.4f}  "
+                  f"[{lme['interaction_ci_low']:+.4f}, {lme['interaction_ci_high']:+.4f}]  "
+                  f"p={lme['p_interaction']:.4f}")
+            print(f"  ML interaction        = {lme['ml_interaction']:+.4f}  "
+                  f"[{lme['ml_interaction_ci_low']:+.4f}, {lme['ml_interaction_ci_high']:+.4f}]")
 
     out_fields = input_fields + ["step", "surprisal_first", "surprisal_mean"]
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
