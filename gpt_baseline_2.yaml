@@ -116,7 +116,7 @@ eval:
 
 
   # Number of optimizer steps between evaluation calls (type: int, default: 1000)
-  interval: 1000
+  interval: 100
 
 
   # Number of tokens to generate (type: Optional[int], default: null)
