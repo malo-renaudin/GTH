@@ -1,8 +1,8 @@
 import glob
 from litgpt.tokenizer import Tokenizer
 from litdata import optimize
+from litdata.streaming.item_loader import TokensLoader
 
-# 1. Setup Tokenizer
 tokenizer = Tokenizer("checkpoints/gpt2")
 
 def parse_txt(file_path):
@@ -10,15 +10,20 @@ def parse_txt(file_path):
         for line in f:
             text = line.strip()
             if text:
+                # Yield the list of tokens
                 yield tokenizer.encode(text)
 
 if __name__ == "__main__":
-    files = glob.glob("validation_data/*.txt")
-
+    # IMPORTANT: Delete the old folder first to avoid metadata contamination
+    # rm -rf chunked_data_baseline/train
+    
+    files = glob.glob("train_data/baseline/*.txt")
+    
     optimize(
         fn=parse_txt,
         inputs=files,
-        output_dir="chunked_data_baseline/val",
-        num_workers=4,        # Adjust based on your CPU allocation
-        chunk_bytes="64MB"    # Use chunk_bytes for memory-based sizing
+        output_dir="chunked_data_baseline/train",
+        chunk_bytes="64MB",
+        # Explicitly set the item_loader for language modeling tokens
+        item_loader=TokensLoader(block_size=1024) 
     )
