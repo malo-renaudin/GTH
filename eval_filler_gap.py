@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from litgpt import Tokenizer
 
-from eval_test import load_checkpoint, resolve_checkpoint_file, step_from_checkpoint
+from utils import load_checkpoint, resolve_checkpoint_file, step_from_checkpoint
 
 
 def compute_gap_surprisals_batch(

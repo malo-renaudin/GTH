@@ -1,26 +1,37 @@
 import argparse
 import csv
+import math
+import statistics
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import List, Set, Tuple
 
 import torch
 from tqdm import tqdm
 
 from litgpt import Tokenizer
-from litgpt.config import Config
-from litgpt.model import GPT
 
-nouns_orc = ["boy", "boys","student", "students","doctor", "doctors", "artist","artists", "athlete", "athletes", "girl", "girls", "child", "children", "pilot", "pilots", "scientist", "scientists", "engineer", "engineers"]
-# nouns_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist", "child", "girl", "boy", "patient", "client", "tourist"]
-n1_opts_wh = ["student", "doctor", "pilot", "officer", "athlete",
-           "artist"]
-n2_opts_wh = ["child", "girl", "boy", "patient", "client", 
-           "tourist"]
-adj1_opts = ["young", "tall", "smart", "brave", "kind", 
-             "famous"]
-adj2_opts = ["creative", "serious", "friendly", "quiet", "active"] 
-           
+from utils import (
+    ORC_REL_MARKERS,
+    extract_orc_moved_np,
+    lexical_mass,
+    load_checkpoint,
+    normalize_word,
+    np_chain_logprob,
+    read_nonempty_lines,
+    resolve_checkpoint_file,
+    step_from_checkpoint,
+    _word_token_spans,
+)
+
+nouns_orc = ["boy", "boys", "student", "students", "doctor", "doctors", "artist", "artists",
+             "athlete", "athletes", "girl", "girls", "child", "children", "pilot", "pilots",
+             "scientist", "scientists", "engineer", "engineers"]
+n1_opts_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist"]
+n2_opts_wh = ["child", "girl", "boy", "patient", "client", "tourist"]
+adj1_opts  = ["young", "tall", "smart", "brave", "kind", "famous"]
+adj2_opts  = ["creative", "serious", "friendly", "quiet", "active"]
+
 np_wh: List[Tuple[str, str]] = (
     [(n, a) for n in n1_opts_wh for a in adj1_opts] +
     [(n, a) for n in n2_opts_wh for a in adj2_opts]
@@ -33,160 +44,15 @@ verbs_wh = [
     "observe", "observed", "observing",
 ]
 
-ORC_REL_MARKERS = {"that", "who"}#peut etre qu'il faut ajouter the ici
 CSV_FIELDS = [
-    "step",
-    "structure",
-    "target_label",
-    "comparator_label",
-    "target_mass",
-    "target_head_mass",
+    "step", "structure", "target_label", "comparator_label",
+    "target_mass", "target_mass_median",
+    "target_head_mass", "target_head_mass_median",
     "the_mass",
-    "comparator_mass",
+    "comparator_mass", "comparator_mass_median",
     "target_minus_comparator",
-    "roi_count",
-    "checkpoint",
+    "roi_count", "checkpoint",
 ]
-
-
-def load_checkpoint(ckpt_file: Path, device: torch.device, max_seq_length: int) -> GPT:
-    """
-    Load a GPT model from a checkpoint file, set max sequence length if needed, and move to device.
-    """
-    model = GPT(Config.from_checkpoint(ckpt_file.parent))
-    raw = torch.load(ckpt_file, map_location=device)
-    state = raw.get("model") if isinstance(raw, dict) and isinstance(raw.get("model"), dict) else raw
-    if not isinstance(state, dict):
-        raise ValueError(f"Unsupported checkpoint format: {ckpt_file}")
-    model.load_state_dict(state, strict=True)
-    if max_seq_length > 0:
-        model.max_seq_length = max_seq_length
-    return model.to(device).eval()
-
-
-def resolve_checkpoint_file(checkpoint_input: Path) -> Path:
-    """
-    Given a path to a checkpoint or checkpoint directory, return the path to the lit_model.pth file.
-    """
-    if checkpoint_input.is_file():
-        if checkpoint_input.name != "lit_model.pth":
-            raise ValueError(f"Expected 'lit_model.pth', got {checkpoint_input.name}")
-        return checkpoint_input
-    if checkpoint_input.is_dir():
-        ckpt = checkpoint_input / "lit_model.pth"
-        if ckpt.exists():
-            return ckpt
-        raise FileNotFoundError(f"No lit_model.pth found in {checkpoint_input}")
-    raise FileNotFoundError(f"Checkpoint not found: {checkpoint_input}")
-
-
-def step_from_checkpoint(ckpt_file: Path) -> int:
-    """
-    Extract the training step number from the checkpoint file or its parent directory name.
-    """
-    name = ckpt_file.parent.name if ckpt_file.name == "lit_model.pth" else ckpt_file.name
-    return int(name.split("-")[1])
-
-
-def read_nonempty_lines(path: Path) -> List[str]:
-    """
-    Read all non-empty, stripped lines from a text file.
-    """
-    with path.open("r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
-
-
-def normalize_word(word: str) -> str:
-    """
-    Lowercase and strip punctuation from a word for matching.
-    """
-    return word.strip(".,?!;:\"'()[]{}").lower()
-
-
-def _word_token_spans(sentence: str, tokenizer: "Tokenizer") -> Tuple[List[int], List[Tuple[str, int, int]]]:
-    """Tokenize sentence without BOS and return (token_ids, [(word, start, end), ...])."""
-    tok, pos = [], 0
-    spans = []
-    for i, word in enumerate(sentence.split()):
-        prefix = "" if i == 0 else " "
-        ids = tokenizer.encode(prefix + word, bos=False, eos=False).tolist()
-        spans.append((word, pos, pos + len(ids)))
-        tok.extend(ids)
-        pos += len(ids)
-    return tok, spans
-
-
-def lexical_mass(probs: torch.Tensor, token_lists: List[List[int]]) -> float:
-    """
-    For a list of token id lists (words/phrases), sum the mean probability for each.
-    """
-    total = 0.0
-    for ids in token_lists:
-        if ids:
-            total += probs[torch.tensor(ids, device=probs.device)].mean().item()
-    return total
-
-
-def extract_orc_moved_np(sentence: str, noun_forms_orc: Set[str]) -> Tuple[List[str], Optional[str]]:
-    """
-    Extract the moved NP (surface string) from an ORC sentence.
-    Returns the list of words in the NP and the head noun.
-    """
-    # Guard against accidental determiners in noun vocabulary.
-    noun_candidates = {
-        normalize_word(w) for w in noun_forms_orc if normalize_word(w) not in {"the", "a", "an"}
-    }
-
-    words = sentence.split()
-    if not words or normalize_word(words[0]) != "the":
-        return [], None
-
-    head_idx = None
-    for i in range(1, len(words)):
-        w = normalize_word(words[i])
-        if w in ORC_REL_MARKERS:
-            break
-        if w == "the":          # zero-relativizer: second "the" starts embedded subject NP
-            break
-        if w in noun_candidates:
-            head_idx = i
-            break
-
-    if head_idx is None:
-        return [], None
-
-    np_words = [normalize_word(w) for w in words[: head_idx + 1] if normalize_word(w)]
-    return np_words, (np_words[-1] if np_words else None)
-
-
-def np_chain_logprob(
-    model: "GPT",
-    x_prefix: torch.Tensor,
-    token_ids: List[int],
-    device: torch.device,
-    first_step_lsp: Optional[torch.Tensor] = None,
-) -> float:
-    """
-    Autoregressive log-probability: sum_i log P(token_ids[i] | x_prefix + token_ids[:i]).
-    Returns the *sum* of per-token log-probs (caller normalises if needed).
-
-    If first_step_lsp is provided (log-softmax of logits at x_prefix already computed
-    by the caller), the first token's probability is read from it directly, saving
-    one forward pass.
-    """
-    if not token_ids:
-        return 0.0
-    log_prob = 0.0
-    x = x_prefix.clone()
-    for i, tok_id in enumerate(token_ids):
-        if i == 0 and first_step_lsp is not None:
-            log_prob += first_step_lsp[tok_id].item()
-        else:
-            with torch.no_grad():
-                logits = model(x)[0, -1, :]
-            log_prob += torch.log_softmax(logits, dim=-1)[tok_id].item()
-        x = torch.cat([x, torch.tensor([[tok_id]], device=device)], dim=1)
-    return log_prob
 
 
 def compute_one_checkpoint(
@@ -195,128 +61,111 @@ def compute_one_checkpoint(
     structure: str,
     sentences: List[str],
     max_seq_length: int,
+    batch_size: int = 32,
 ) -> dict:
-    """
-    Evaluate a single checkpoint on a set of sentences for either ORC or WH structure.
-    For each sentence, find the ROI (first verb), run the model up to that point, and compute:
-      - For ORC: probability mass for the moved NP (full and head) vs verb mass
-      - For WH: probability mass for all WH NPs vs question mark
-    Returns a dict with averaged results and metadata for CSV output.
-    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = Tokenizer(tokenizer_dir)
     model = load_checkpoint(ckpt_file, device, max_seq_length)
 
-    # Prepare token lists for ROI detection and scoring
     roi_verb_set = set(verbs_orc if structure == "orc" else verbs_wh)
-    # roi_target_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in roi_verb_set]
-    # roi_target_flat = {t for lst in roi_target_lists for t in lst}
-
-    # orc_verb_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc]
     orc_verb_continuation_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc_continuation]
-    wh_np_vocab_lists = [
-        tokenizer.encode(" " + " ".join([a, n]), bos=False, eos=False).tolist()
-        for n, a in np_wh
+    # 4 surface forms per (noun, adj): "the adj noun", "the noun", "noun", "adj noun"
+    wh_np_lists = [
+        tokenizer.encode(form, bos=False, eos=False).tolist()
+        for noun, adj in np_wh
+        for form in (f" the {adj} {noun}", f" the {noun}", f" {noun}", f" {adj} {noun}")
     ]
-    wh_noun_lists = [
-        tokenizer.encode(" " + n, bos=False, eos=False).tolist()
-        for n in (n1_opts_wh + n2_opts_wh)
-    ]
-    # Get all token ids for question mark (with and without leading space)
+    wh_noun_lists = [tokenizer.encode(f" {n}", bos=False, eos=False).tolist() for n in n1_opts_wh + n2_opts_wh]
     qmark: Set[int] = set()
-    for p in ["?", " ?"]:
-        qmark.update(tokenizer.encode(p, bos=False, eos=False).tolist())
-    orc_noun_forms = nouns_orc
+    for p_str in ["?", " ?"]:
+        qmark.update(tokenizer.encode(p_str, bos=False, eos=False).tolist())
+    qmark_tensor = torch.tensor(sorted(qmark), device=device)
     the_lists = [tokenizer.encode(" the", bos=False, eos=False).tolist()]
 
-    t_sum, th_sum, the_sum, c_sum, n = 0.0, 0.0, 0.0, 0.0, 0
-    t_label, c_label = (
-        ("moved_np_mass", "verb_mass") if structure == "orc" else ("wh_np_vocab_mass", "question_mark_mass")
-    )
+    t_label = "moved_np_joint_prob" if structure == "orc" else "wh_np_mean_prob"
+    c_label = "verb_prob_mass"       if structure == "orc" else "question_mark_prob"
 
-    for s in tqdm(sentences, desc="  sentences", leave=False):
-        # Tokenize sentence and find ROI (first verb token)
+    # Pre-tokenize all sentences and find ROI indices
+    valid_items: List[Tuple[List[int], int, str]] = []
+    for s in sentences:
         tok, spans = _word_token_spans(s, tokenizer)
         roi_idx = None
         for span_i, (word, start, end) in enumerate(spans):
             if normalize_word(word) in roi_verb_set:
                 if structure == "wh" and word.endswith("?"):
-                    # "?" is attached to the verb (e.g. "visit?"); back off to the token
-                    # just before "?" so the model predicts at the gap, not after "?".
                     prefix = "" if span_i == 0 else " "
                     verb_ids = tokenizer.encode(prefix + word.rstrip("?"), bos=False, eos=False).tolist()
                     roi_idx = start + len(verb_ids) - 1
                 else:
-                    roi_idx = end - 1   # last token of the (possibly multi-token) RC verb
+                    roi_idx = end - 1
                 break
-        if roi_idx is None:
-            continue
+        if roi_idx is not None:
+            valid_items.append((tok, roi_idx, s))
 
-        # Run model up to ROI and get next-token log-probabilities
-        x = torch.tensor(tok[: roi_idx + 1], device=device).unsqueeze(0)
+    t_vals:   List[float] = []
+    th_vals:  List[float] = []
+    the_vals: List[float] = []
+    c_vals:   List[float] = []
+
+    for batch_start in tqdm(range(0, len(valid_items), batch_size), desc="  batches", leave=False):
+        batch = valid_items[batch_start: batch_start + batch_size]
+        contexts = [tok[: roi_idx + 1] for tok, roi_idx, _ in batch]
+        ctx_lengths = [len(c) for c in contexts]
+        max_ctx = max(ctx_lengths)
+        x_batch = torch.tensor(
+            [c + [0] * (max_ctx - len(c)) for c in contexts], device=device
+        )
         with torch.no_grad():
-            logits = model(x)[0, -1, :]
-        lsp = torch.log_softmax(logits, dim=-1)  # log-probs for single-step lookups
-        probs = lsp.exp()  # kept for the_mass
+            logits_batch = model(x_batch)
 
-        if structure == "orc":
-            # Extract moved NP (surface) and head noun for this sentence
-            np_words, head = extract_orc_moved_np(s, orc_noun_forms)
-            if not np_words or head is None:
-                continue
-            flat_np_ids = [
-                t
-                for w in np_words
-                for t in tokenizer.encode(" " + w, bos=False, eos=False).tolist()
-            ]
-            head_ids = tokenizer.encode(" " + head, bos=False, eos=False).tolist()
-            # Mean log-prob of full NP: P(the)*P(adj|the)*P(noun|the adj), length-normalised
-            # Pass lsp to skip the first forward pass (already computed above)
-            target = np_chain_logprob(model, x, flat_np_ids, device, first_step_lsp=lsp) / max(1, len(flat_np_ids))
-            target_head = np_chain_logprob(model, x, head_ids, device, first_step_lsp=lsp) / max(1, len(head_ids))
-            # Logsumexp over verb-continuation tokens (all single-step: reuse existing logits)
-            comp = torch.stack([
-                lsp[torch.tensor(ids, device=device)].logsumexp(0)
-                for ids in orc_verb_continuation_lists if ids
-            ]).logsumexp(0).item()
-            t_label, c_label = "moved_np_mean_logprob", "verb_logsumexp"
-        else:
-            # WH: logsumexp over all NP candidates (autoregressive chain for each).
-            # log sum_i P(NP_i | ctx) — total probability mass on any valid NP filler.
-            # target_minus_comparator < 0 means model prefers "?" over any NP: WH dependency learned.
-            # Pass lsp to skip the first forward pass for every candidate
-            np_log_probs = torch.tensor([
-                np_chain_logprob(model, x, ids, device, first_step_lsp=lsp)
-                for ids in wh_np_vocab_lists if ids
-            ])
-            target = np_log_probs.logsumexp(0).item()
-            noun_log_probs = torch.tensor([
-                np_chain_logprob(model, x, ids, device, first_step_lsp=lsp)
-                for ids in wh_noun_lists if ids
-            ])
-            target_head = noun_log_probs.logsumexp(0).item()
-            # Log P(?) from already-computed logits (single step)
-            comp = lsp[torch.tensor(sorted(qmark), device=device)].logsumexp(0).item()
-            t_label, c_label = "wh_np_logsumexp", "question_mark_logprob"
+        for i, (tok, roi_idx, s) in enumerate(batch):
+            lsp = torch.log_softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
+            x   = torch.tensor(contexts[i], device=device).unsqueeze(0)
 
-        the_mass = lexical_mass(probs, the_lists)
-        t_sum += target
-        th_sum += target_head
-        the_sum += the_mass
-        c_sum += comp
-        n += 1
+            def chain_prob(ids: List[int]) -> float:
+                return math.exp(np_chain_logprob(model, x, ids, device, first_step_lsp=lsp))
+
+            if structure == "orc":
+                np_words, head = extract_orc_moved_np(s, nouns_orc)
+                if not np_words or head is None:
+                    continue
+                flat_np_ids = [t for w in np_words for t in tokenizer.encode(" " + w, bos=False, eos=False).tolist()]
+                head_ids    = tokenizer.encode(" " + head, bos=False, eos=False).tolist()
+                # Joint probability of the full NP (no per-token normalization)
+                target      = chain_prob(flat_np_ids)
+                target_head = chain_prob(head_ids)
+                comp = math.exp(torch.stack([
+                    lsp[torch.tensor(ids, device=device)].logsumexp(0)
+                    for ids in orc_verb_continuation_lists if ids
+                ]).logsumexp(0).item())
+            else:
+                # Mean P(NP form) across all 4 forms × (noun, adj) pairs
+                np_probs   = [chain_prob(ids) for ids in wh_np_lists   if ids]
+                noun_probs = [chain_prob(ids) for ids in wh_noun_lists if ids]
+                target      = sum(np_probs)   / len(np_probs)
+                target_head = sum(noun_probs) / len(noun_probs)
+                comp = math.exp(lsp[qmark_tensor].logsumexp(0).item())
+
+            t_vals.append(target)
+            th_vals.append(target_head)
+            the_vals.append(lexical_mass(lsp.exp(), the_lists))
+            c_vals.append(comp)
 
     del model
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
     step = step_from_checkpoint(ckpt_file)
+    n = len(t_vals)
     if n == 0:
-        t_avg = th_avg = the_avg = c_avg = 0.0
+        t_avg = t_med = th_avg = th_med = the_avg = c_avg = c_med = 0.0
     else:
-        t_avg, th_avg, the_avg, c_avg = t_sum / n, th_sum / n, the_sum / n, c_sum / n
+        t_avg,  t_med  = statistics.mean(t_vals),   statistics.median(t_vals)
+        th_avg, th_med = statistics.mean(th_vals),  statistics.median(th_vals)
+        the_avg        = statistics.mean(the_vals)
+        c_avg,  c_med  = statistics.mean(c_vals),   statistics.median(c_vals)
 
-    print(f"  step {step}: target_mass={t_avg:.6f}, the_mass={the_avg:.6f}, comparator_mass={c_avg:.6f}, roi_count={n}")
+    print(f"  step {step}: target={t_avg:.6f} (med={t_med:.6f}), comparator={c_avg:.6f}, roi_count={n}")
 
     return {
         "step": step,
@@ -324,16 +173,19 @@ def compute_one_checkpoint(
         "target_label": t_label,
         "comparator_label": c_label,
         "target_mass": round(t_avg, 6),
+        "target_mass_median": round(t_med, 6),
         "target_head_mass": round(th_avg, 6),
+        "target_head_mass_median": round(th_med, 6),
         "the_mass": round(the_avg, 6),
         "comparator_mass": round(c_avg, 6),
+        "comparator_mass_median": round(c_med, 6),
         "target_minus_comparator": round(t_avg - c_avg, 6),
         "roi_count": n,
         "checkpoint": str(ckpt_file),
     }
 
 
-def worker_unpack(args: Tuple[Path, Path, str, List[str], int]) -> dict:
+def worker_unpack(args: Tuple[Path, Path, str, List[str], int, int]) -> dict:
     return compute_one_checkpoint(*args)
 
 
@@ -355,6 +207,7 @@ def main() -> None:
     p.add_argument("--structure", choices=["orc", "wh"], required=True)
     p.add_argument("--num-processes", type=int, default=1)
     p.add_argument("--max-seq-length", type=int, default=0)
+    p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--result-name", type=Path, default=Path("results/eval_test_scan.csv"))
     args = p.parse_args()
 
@@ -362,7 +215,7 @@ def main() -> None:
 
     if args.checkpoint is not None:
         ckpt = resolve_checkpoint_file(args.checkpoint)
-        rows = [compute_one_checkpoint(ckpt, args.tokenizer_dir, args.structure, sentences, args.max_seq_length)]
+        rows = [compute_one_checkpoint(ckpt, args.tokenizer_dir, args.structure, sentences, args.max_seq_length, args.batch_size)]
         write_rows(rows, args.result_name)
         print(f"Results saved to: {args.result_name}")
         return
@@ -371,7 +224,7 @@ def main() -> None:
     if not ckpts:
         raise FileNotFoundError(f"No step checkpoints found under {args.checkpoint_dir}")
 
-    items = [(ckpt, args.tokenizer_dir, args.structure, sentences, args.max_seq_length) for ckpt in ckpts]
+    items = [(ckpt, args.tokenizer_dir, args.structure, sentences, args.max_seq_length, args.batch_size) for ckpt in ckpts]
     rows = []
     with ProcessPoolExecutor(max_workers=args.num_processes) as ex:
         for r in tqdm(ex.map(worker_unpack, items), total=len(items), desc="checkpoints"):
