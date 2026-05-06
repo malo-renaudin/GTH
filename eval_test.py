@@ -159,6 +159,36 @@ def extract_orc_moved_np(sentence: str, noun_forms_orc: Set[str]) -> Tuple[List[
     return np_words, (np_words[-1] if np_words else None)
 
 
+def np_chain_logprob(
+    model: "GPT",
+    x_prefix: torch.Tensor,
+    token_ids: List[int],
+    device: torch.device,
+    first_step_lsp: Optional[torch.Tensor] = None,
+) -> float:
+    """
+    Autoregressive log-probability: sum_i log P(token_ids[i] | x_prefix + token_ids[:i]).
+    Returns the *sum* of per-token log-probs (caller normalises if needed).
+
+    If first_step_lsp is provided (log-softmax of logits at x_prefix already computed
+    by the caller), the first token's probability is read from it directly, saving
+    one forward pass.
+    """
+    if not token_ids:
+        return 0.0
+    log_prob = 0.0
+    x = x_prefix.clone()
+    for i, tok_id in enumerate(token_ids):
+        if i == 0 and first_step_lsp is not None:
+            log_prob += first_step_lsp[tok_id].item()
+        else:
+            with torch.no_grad():
+                logits = model(x)[0, -1, :]
+            log_prob += torch.log_softmax(logits, dim=-1)[tok_id].item()
+        x = torch.cat([x, torch.tensor([[tok_id]], device=device)], dim=1)
+    return log_prob
+
+
 def compute_one_checkpoint(
     ckpt_file: Path,
     tokenizer_dir: Path,
@@ -222,34 +252,52 @@ def compute_one_checkpoint(
         if roi_idx is None:
             continue
 
-        # Run model up to ROI and get next-token probabilities
+        # Run model up to ROI and get next-token log-probabilities
         x = torch.tensor(tok[: roi_idx + 1], device=device).unsqueeze(0)
         with torch.no_grad():
             logits = model(x)[0, -1, :]
-        probs = torch.softmax(logits, dim=-1)
+        lsp = torch.log_softmax(logits, dim=-1)  # log-probs for single-step lookups
+        probs = lsp.exp()  # kept for the_mass
 
         if structure == "orc":
             # Extract moved NP (surface) and head noun for this sentence
             np_words, head = extract_orc_moved_np(s, orc_noun_forms)
             if not np_words or head is None:
                 continue
-            np_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in np_words]
-            head_list = [tokenizer.encode(" " + head, bos=False, eos=False).tolist()]
-            # Average probability for full NP (length-normalized) and for head noun only
-            target = lexical_mass(probs, np_lists) / max(1, len(np_lists))
-            target_head = lexical_mass(probs, head_list) / max(1, len(head_list))
-            comp = lexical_mass(probs, orc_verb_continuation_lists) / max(1, len(orc_verb_continuation_lists))
-            t_label, c_label = "moved_np_mass", "verb_mass"
+            flat_np_ids = [
+                t
+                for w in np_words
+                for t in tokenizer.encode(" " + w, bos=False, eos=False).tolist()
+            ]
+            head_ids = tokenizer.encode(" " + head, bos=False, eos=False).tolist()
+            # Mean log-prob of full NP: P(the)*P(adj|the)*P(noun|the adj), length-normalised
+            # Pass lsp to skip the first forward pass (already computed above)
+            target = np_chain_logprob(model, x, flat_np_ids, device, first_step_lsp=lsp) / max(1, len(flat_np_ids))
+            target_head = np_chain_logprob(model, x, head_ids, device, first_step_lsp=lsp) / max(1, len(head_ids))
+            # Logsumexp over verb-continuation tokens (all single-step: reuse existing logits)
+            comp = torch.stack([
+                lsp[torch.tensor(ids, device=device)].logsumexp(0)
+                for ids in orc_verb_continuation_lists if ids
+            ]).logsumexp(0).item()
+            t_label, c_label = "moved_np_mean_logprob", "verb_logsumexp"
         else:
-            # WH: sum probability for all WH NPs, compare to question mark.
-            # target_minus_comparator < 0 means the model understands WH movement:
-            # it prefers "?" over an NP filler because the gap is already filled by the fronted WH phrase.
-            # Same direction as ORC: for ORC, target_minus_comparator < 0 means the model prefers
-            # verb continuation over the moved NP, i.e. it knows the object gap is already filled.
-            target = lexical_mass(probs, wh_np_vocab_lists)/max(1, len(wh_np_vocab_lists))  # average over all WH NP variants
-            target_head = lexical_mass(probs, wh_noun_lists)/max(1, len(wh_noun_lists))  # noun-only mass (parallel to ORC head)
-            comp = lexical_mass(probs, [sorted(qmark)])  # treat all ?-token variants as one group
-            t_label, c_label = "wh_np_vocab_mass", "question_mark_mass"
+            # WH: logsumexp over all NP candidates (autoregressive chain for each).
+            # log sum_i P(NP_i | ctx) — total probability mass on any valid NP filler.
+            # target_minus_comparator < 0 means model prefers "?" over any NP: WH dependency learned.
+            # Pass lsp to skip the first forward pass for every candidate
+            np_log_probs = torch.tensor([
+                np_chain_logprob(model, x, ids, device, first_step_lsp=lsp)
+                for ids in wh_np_vocab_lists if ids
+            ])
+            target = np_log_probs.logsumexp(0).item()
+            noun_log_probs = torch.tensor([
+                np_chain_logprob(model, x, ids, device, first_step_lsp=lsp)
+                for ids in wh_noun_lists if ids
+            ])
+            target_head = noun_log_probs.logsumexp(0).item()
+            # Log P(?) from already-computed logits (single step)
+            comp = lsp[torch.tensor(sorted(qmark), device=device)].logsumexp(0).item()
+            t_label, c_label = "wh_np_logsumexp", "question_mark_logprob"
 
         the_mass = lexical_mass(probs, the_lists)
         t_sum += target
