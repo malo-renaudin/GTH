@@ -173,7 +173,8 @@ def _run_lme_one_step(step, df, surprisal_col="surprisal_first"):
     
 def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
                    max_seq_length: int, device: torch.device,
-                   batch_size: int = 32) -> List[dict]:
+                   batch_size: int = 32) -> Tuple[List[dict], List[dict]]:
+    """Returns (surprisal_rows, lme_rows)."""
     step = step_from_checkpoint(ckpt_file)
     print(f"\n=== step {step} ===")
     model = load_checkpoint(ckpt_file, device, max_seq_length)
@@ -209,8 +210,11 @@ def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
     df = pd.DataFrame(results)
     df["filler"] = df["filler"].astype(int)
     df["gap"]    = df["gap"].astype(int)
+    lme_rows = []
     for col in ("surprisal_first", "surprisal_mean"):
         lme = _run_lme_one_step(step, df, surprisal_col=col)
+        lme["surprisal_col"] = col
+        lme_rows.append(lme)
         print(f"\n[LME {col}] step={step}  n_obs={lme['n_obs']}  n_items={lme['n_items']}  converged={lme['converged']}")
         print(f"  licensing_interaction = {lme['licensing_interaction']:+.4f}  "
               f"[{lme['interaction_ci_low']:+.4f}, {lme['interaction_ci_high']:+.4f}]  "
@@ -218,7 +222,7 @@ def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
         print(f"  ML interaction        = {lme['ml_interaction']:+.4f}  "
               f"[{lme['ml_interaction_ci_low']:+.4f}, {lme['ml_interaction_ci_high']:+.4f}]")
 
-    return results
+    return results, lme_rows
 
 
 def main() -> None:
@@ -255,8 +259,11 @@ def main() -> None:
             raise FileNotFoundError(f"No step checkpoints found in {args.checkpoint_dir}")
 
     all_results = []
+    all_lme_rows = []
     for ckpt_file in ckpts:
-        all_results.extend(run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device, args.batch_size))
+        surprisal_rows, lme_rows = run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device, args.batch_size)
+        all_results.extend(surprisal_rows)
+        all_lme_rows.extend(lme_rows)
 
     out_fields = input_fields + ["step", "surprisal_first", "surprisal_mean"]
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -264,8 +271,21 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=out_fields)
         writer.writeheader()
         writer.writerows(all_results)
-
     print(f"\nResults saved to: {args.output_csv}")
+
+    lme_csv = args.output_csv.with_stem(args.output_csv.stem + "_lme")
+    lme_fields = ["step", "surprisal_col", "n_obs", "n_items", "converged",
+                  "intercept", "filler_c", "gap_c", "filler_c:gap_c",
+                  "licensing_interaction", "p_filler_c", "p_gap_c", "p_interaction",
+                  "interaction_ci_low", "interaction_ci_high",
+                  "ml_mean_wh_gap", "ml_mean_wh_no_gap", "ml_mean_no_wh_gap", "ml_mean_no_wh_no_gap",
+                  "ml_se_wh_gap", "ml_se_wh_no_gap", "ml_se_no_wh_gap", "ml_se_no_wh_no_gap",
+                  "ml_interaction", "ml_interaction_ci_low", "ml_interaction_ci_high"]
+    with open(lme_csv, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=lme_fields)
+        writer.writeheader()
+        writer.writerows(all_lme_rows)
+    print(f"LME results saved to: {lme_csv}")
 
 
 if __name__ == "__main__":
