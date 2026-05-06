@@ -51,8 +51,12 @@ resume: false
 data:
   class_path: litgpt.data.LitData
   init_args:
-    train_data_path: train_data/optimized_baseline
-    val_data_path: validation_data
+    # Point this to the ROOT folder containing your optimized chunks
+    data_path: chunked_data_baseline
+    
+    # If your folder contains 'train' and 'val' subfolders, specify them here:
+    split_names: ["train", "val"]
+    
     seed: 2357
 
 
