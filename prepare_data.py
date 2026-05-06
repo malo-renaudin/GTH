@@ -13,12 +13,12 @@ def parse_txt(file_path):
                 yield tokenizer.encode(text)
 
 if __name__ == "__main__":
-    files = glob.glob("train_data/baseline/*.txt")
+    files = glob.glob("validation_data/*.txt")
 
     optimize(
         fn=parse_txt,
         inputs=files,
-        output_dir="data/optimized_baseline",
+        output_dir="chunked_data_baseline/val",
         num_workers=4,        # Adjust based on your CPU allocation
         chunk_bytes="64MB"    # Use chunk_bytes for memory-based sizing
     )
