@@ -15,4 +15,4 @@
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
-litgpt pretrain --config gpt_wh_2.yaml
+litgpt pretrain --config gpt_orc_2.yaml
