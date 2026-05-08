@@ -17,12 +17,12 @@ if __name__ == "__main__":
     # IMPORTANT: Delete the old folder first to avoid metadata contamination
     # rm -rf chunked_data_baseline/train
     
-    files = glob.glob("train_data/baseline_2/*.txt")
+    files = glob.glob("train_data/orc_max_2/*.txt")
     
     optimize(
         fn=parse_txt,
         inputs=files,
-        output_dir="chunked_data_baseline/train",
+        output_dir="chunked_data_orc/train",
         chunk_bytes="64MB",
         # Explicitly set the item_loader for language modeling tokens
         item_loader=TokensLoader(block_size=1024) 
