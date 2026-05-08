@@ -102,22 +102,22 @@ def np_chain_logprob(
     x_prefix: torch.Tensor,
     token_ids: List[int],
     device: torch.device,
-    first_step_lsp: Optional[torch.Tensor] = None,
+    first_step_probs: Optional[torch.Tensor] = None,
 ) -> float:
     """
-    Sum of autoregressive log-probs: sum_i log P(token_ids[i] | x_prefix + token_ids[:i]).
-    If first_step_lsp is provided, reuses it for the first token to save a forward pass.
+    Product of autoregressive probabilities: prod_i P(token_ids[i] | x_prefix + token_ids[:i]).
+    If first_step_probs is provided, reuses it for the first token to save a forward pass.
     """
     if not token_ids:
-        return 0.0
-    log_prob = 0.0
+        return 1.0
+    prob = 1.0
     x = x_prefix.clone()
     for i, tok_id in enumerate(token_ids):
-        if i == 0 and first_step_lsp is not None:
-            log_prob += first_step_lsp[tok_id].item()
+        if i == 0 and first_step_probs is not None:
+            prob *= first_step_probs[tok_id].item()
         else:
             with torch.no_grad():
                 logits = model(x)[0, -1, :]
-            log_prob += torch.log_softmax(logits, dim=-1)[tok_id].item()
+            prob *= torch.softmax(logits, dim=-1)[tok_id].item()
         x = torch.cat([x, torch.tensor([[tok_id]], device=device)], dim=1)
-    return log_prob
+    return prob
