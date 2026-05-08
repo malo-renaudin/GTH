@@ -9,10 +9,13 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=02:00:00
-#SBATCH --error=error_train_%j.log
-#SBATCH --output=output_train_%j.log
+#SBATCH --array=0-1
+#SBATCH --error=error_train_%a.log
+#SBATCH --output=output_train_%a.log
 
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
-litgpt pretrain --config gpt_orc_2.yaml
+CONFIGS=(gpt_orc_2.yaml gpt_wh_2.yaml)
+
+litgpt pretrain --config ${CONFIGS[$SLURM_ARRAY_TASK_ID]}
