@@ -10,6 +10,8 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=10:00:00
 #SBATCH --array=0-1
+#SBATCH --error=error_eval_%a.log
+#SBATCH --output=output_eval_%a.log
 
 STRUCTURES=(orc wh)
 SENT_FILES=(data/valid_orc7_not_in_train_orc_6_72.txt data/valid_wh5_not_in_wh_7_20.txt)
