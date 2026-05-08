@@ -13,6 +13,9 @@
 #SBATCH --error=error_eval_%a.log
 #SBATCH --output=output_eval_%a.log
 
+source $WORK/miniconda3/etc/profile.d/conda.sh
+conda activate litgpt_jz
+
 STRUCTURES=(orc wh)
 SENT_FILES=(data/valid_orc7_not_in_train_orc_6_72.txt data/valid_wh5_not_in_wh_7_20.txt)
 RESULT_FILES=(np_mass_baseline_2_orc.csv np_mass_baseline_2_wh.csv)
