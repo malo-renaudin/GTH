@@ -1,6 +1,5 @@
 import argparse
 import csv
-import math
 import statistics
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -82,7 +81,7 @@ def compute_one_checkpoint(
     qmark_tensor = torch.tensor(sorted(qmark), device=device)
     the_lists = [tokenizer.encode(" the", bos=False, eos=False).tolist()]
 
-    t_label = "moved_np_joint_prob" if structure == "orc" else "wh_np_mean_prob"
+    t_label = "moved_np_geomean_prob" if structure == "orc" else "wh_np_geomean_mean_prob"
     c_label = "verb_prob_mass"       if structure == "orc" else "question_mark_prob"
 
     # Pre-tokenize all sentences and find ROI indices
@@ -119,11 +118,14 @@ def compute_one_checkpoint(
             logits_batch = model(x_batch)
 
         for i, (tok, roi_idx, s) in enumerate(batch):
-            lsp = torch.log_softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
+            sp  = torch.softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
             x   = torch.tensor(contexts[i], device=device).unsqueeze(0)
 
             def chain_prob(ids: List[int]) -> float:
-                return math.exp(np_chain_logprob(model, x, ids, device, first_step_lsp=lsp))
+                return np_chain_logprob(model, x, ids, device, first_step_probs=sp)
+
+            def geomean_prob(ids: List[int]) -> float:
+                return chain_prob(ids) ** (1 / len(ids))
 
             if structure == "orc":
                 np_words, head = extract_orc_moved_np(s, nouns_orc)
@@ -131,24 +133,21 @@ def compute_one_checkpoint(
                     continue
                 flat_np_ids = [t for w in np_words for t in tokenizer.encode(" " + w, bos=False, eos=False).tolist()]
                 head_ids    = tokenizer.encode(" " + head, bos=False, eos=False).tolist()
-                # Joint probability of the full NP (no per-token normalization)
-                target      = chain_prob(flat_np_ids)
-                target_head = chain_prob(head_ids)
-                comp = math.exp(torch.stack([
-                    lsp[torch.tensor(ids, device=device)].logsumexp(0)
-                    for ids in orc_verb_continuation_lists if ids
-                ]).logsumexp(0).item())
+                target      = geomean_prob(flat_np_ids)
+                target_head = geomean_prob(head_ids)
+                verb_probs  = [geomean_prob(ids) for ids in orc_verb_continuation_lists if ids]
+                comp = sum(verb_probs) / len(verb_probs)
             else:
-                # Mean P(NP form) across all 4 forms × (noun, adj) pairs
-                np_probs   = [chain_prob(ids) for ids in wh_np_lists   if ids]
-                noun_probs = [chain_prob(ids) for ids in wh_noun_lists if ids]
+                # Mean geometric-mean P(NP form) across all 4 forms × (noun, adj) pairs
+                np_probs   = [geomean_prob(ids) for ids in wh_np_lists   if ids]
+                noun_probs = [geomean_prob(ids) for ids in wh_noun_lists if ids]
                 target      = sum(np_probs)   / len(np_probs)
                 target_head = sum(noun_probs) / len(noun_probs)
-                comp = math.exp(lsp[qmark_tensor].logsumexp(0).item())
+                comp = sp[qmark_tensor].sum().item()
 
             t_vals.append(target)
             th_vals.append(target_head)
-            the_vals.append(lexical_mass(lsp.exp(), the_lists))
+            the_vals.append(lexical_mass(sp, the_lists))
             c_vals.append(comp)
 
     del model
