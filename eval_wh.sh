@@ -23,7 +23,7 @@ MODEL_NAME=$(basename $CHECKPOINT_DIR)
 
 python eval_test.py \
     --checkpoint-dir $CHECKPOINT_DIR \
-    --sentences-file data/english_data/wh.txt \
+    --sentences-file data/wh.txt \
     --structure wh \
     --batch-size 512 \
     --result-name np_mass_${MODEL_NAME}_wh.csv
