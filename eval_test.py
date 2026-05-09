@@ -28,13 +28,6 @@ nouns_orc = ["boy", "boys", "student", "students", "doctor", "doctors", "artist"
              "scientist", "scientists", "engineer", "engineers"]
 n1_opts_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist"]
 n2_opts_wh = ["child", "girl", "boy", "patient", "client", "tourist"]
-adj1_opts  = ["young", "tall", "smart", "brave", "kind", "famous"]
-adj2_opts  = ["creative", "serious", "friendly", "quiet", "active"]
-
-np_wh: List[Tuple[str, str]] = (
-    [(n, a) for n in n1_opts_wh for a in adj1_opts] +
-    [(n, a) for n in n2_opts_wh for a in adj2_opts]
-)
 verbs_orc_continuation = ["is", "are", "likes", "like", "enjoys", "enjoy"]
 verbs_orc = ["visits", "visit", "helps", "help", "avoids", "avoid", "follows", "follow", "greets", "greet"]
 verbs_wh = [
@@ -68,11 +61,10 @@ def compute_one_checkpoint(
 
     roi_verb_set = set(verbs_orc if structure == "orc" else verbs_wh)
     orc_verb_continuation_lists = [tokenizer.encode(" " + w, bos=False, eos=False).tolist() for w in verbs_orc_continuation]
-    # 4 surface forms per (noun, adj): "the adj noun", "the noun", "noun", "adj noun"
+    # Only "the + head noun" forms (no adjectives)
     wh_np_lists = [
-        tokenizer.encode(form, bos=False, eos=False).tolist()
-        for noun, adj in np_wh
-        for form in (f" the {adj} {noun}", f" the {noun}", f" {noun}", f" {adj} {noun}")
+        tokenizer.encode(f" the {noun}", bos=False, eos=False).tolist()
+        for noun in n1_opts_wh + n2_opts_wh
     ]
     wh_noun_lists = [tokenizer.encode(f" {n}", bos=False, eos=False).tolist() for n in n1_opts_wh + n2_opts_wh]
     qmark: Set[int] = set()
