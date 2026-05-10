@@ -21,7 +21,7 @@ MODELS=(out/pretrain/gpt_wh_2 out/pretrain/gpt_orc_2 out/pretrain/gpt_baseline_2
 CHECKPOINT_DIR=${MODELS[$SLURM_ARRAY_TASK_ID]}
 MODEL_NAME=$(basename $CHECKPOINT_DIR)
 
-python eval_test.py \
+python eval_gap_np_orc.py \
     --checkpoint-dir $CHECKPOINT_DIR \
     --sentences-file data/orc.txt \
     --batch-size 512 \
