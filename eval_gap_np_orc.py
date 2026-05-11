@@ -55,10 +55,13 @@ VERBS_ORC = [
 
 CSV_FIELDS = [
     "step", "structure",
-    "target_label", "comparator_label",
+    "target_label", "embedded_label", "comparator_label",
     "target_mass", "target_mass_median",
+    "embedded_mass", "embedded_mass_median",
     "vocab_mass", "vocab_mass_median",
     "target_minus_vocab",
+    "target_minus_embedded",
+    "embedded_minus_vocab",
     "roi_count", "checkpoint",
 ]
 
@@ -69,6 +72,28 @@ def _build_np_token_lists(nouns: List[str], tokenizer: Tokenizer) -> List[Tuple[
         (noun, tokenizer.encode(f" the {noun}", bos=False, eos=False).tolist())
         for noun in nouns
     ]
+
+
+def extract_orc_embedded_np(sentence: str, noun_candidates: Set[str]) -> Tuple[List[str], Optional[str]]:
+    """Extract the embedded subject NP (e.g. 'the boy' in 'the girl that the boy likes').
+
+    Looks for the NP immediately following the relativizer (that/who).
+    Returns (np_words, head_noun) or ([], None) if not found.
+    """
+    words = sentence.split()
+    rel_idx = None
+    for i, w in enumerate(words):
+        if normalize_word(w) in ORC_REL_MARKERS:
+            rel_idx = i
+            break
+    if rel_idx is None or rel_idx + 2 >= len(words):
+        return [], None
+    if normalize_word(words[rel_idx + 1]) != "the":
+        return [], None
+    head = normalize_word(words[rel_idx + 2])
+    if head not in noun_candidates:
+        return [], None
+    return ["the", head], head
 
 
 def compute_one_checkpoint(
@@ -84,6 +109,9 @@ def compute_one_checkpoint(
 
     roi_verb_set: Set[str] = set(VERBS_ORC)
     vocab_np_list = _build_np_token_lists(VOCAB_NOUNS, tokenizer)
+    noun_candidates_set = {
+        normalize_word(w) for w in NOUNS_ORC if normalize_word(w) not in {"the", "a", "an"}
+    }
 
     # Pre-tokenize and locate gap site (last token of embedded verb)
     valid_items: List[Tuple[List[int], int, str]] = []
@@ -98,6 +126,7 @@ def compute_one_checkpoint(
             valid_items.append((tok, roi_idx, s))
 
     t_vals: List[float] = []
+    e_vals: List[float] = []
     v_vals: List[float] = []
 
     for batch_start in tqdm(range(0, len(valid_items), batch_size), desc="  batches", leave=False):
@@ -119,7 +148,7 @@ def compute_one_checkpoint(
                 lp = np_chain_logprob(model, x, ids, device, first_step_probs=sp)
                 return lp ** (1.0 / len(ids))
 
-            # target: the moved NP
+            # target: the moved NP (e.g. "the girl")
             np_words, head = extract_orc_moved_np(s, set(NOUNS_ORC))
             if not np_words or head is None:
                 continue
@@ -129,12 +158,28 @@ def compute_one_checkpoint(
             ]
             target = geomean_prob(flat_ids)
 
-            # comparator: vocab NPs, excluding the actual moved NP
+            # embedded NP: the subject inside the relative clause (e.g. "the boy")
+            emb_words, emb_head = extract_orc_embedded_np(s, noun_candidates_set)
+            if emb_words and emb_head is not None:
+                emb_flat_ids = [
+                    t for w in emb_words
+                    for t in tokenizer.encode(" " + w, bos=False, eos=False).tolist()
+                ]
+                embedded = geomean_prob(emb_flat_ids)
+                e_vals.append(embedded)
+            else:
+                emb_head = None
+                embedded = float("nan")
+
+            # comparator: vocab NPs, excluding both the moved NP and the embedded NP
             moved_head_norm = normalize_word(head)
+            exclude_heads = {moved_head_norm}
+            if emb_head is not None:
+                exclude_heads.add(normalize_word(emb_head))
             comparator_probs = [
                 geomean_prob(ids)
                 for noun, ids in vocab_np_list
-                if normalize_word(noun) != moved_head_norm and ids
+                if normalize_word(noun) not in exclude_heads and ids
             ]
             if not comparator_probs:
                 continue
@@ -149,13 +194,16 @@ def compute_one_checkpoint(
     step = step_from_checkpoint(ckpt_file)
     n = len(t_vals)
     if n == 0:
-        t_avg = t_med = v_avg = v_med = 0.0
+        t_avg = t_med = e_avg = e_med = v_avg = v_med = 0.0
     else:
         t_avg, t_med = statistics.mean(t_vals), statistics.median(t_vals)
         v_avg, v_med = statistics.mean(v_vals), statistics.median(v_vals)
+        e_avg = statistics.mean(e_vals) if e_vals else float("nan")
+        e_med = statistics.median(e_vals) if e_vals else float("nan")
 
     print(
         f"  step {step}: moved_np={t_avg:.6f} (med={t_med:.6f}), "
+        f"embedded_np={e_avg:.6f} (med={e_med:.6f}), "
         f"vocab_np={v_avg:.6f} (med={v_med:.6f}), n={n}"
     )
 
@@ -163,12 +211,17 @@ def compute_one_checkpoint(
         "step": step,
         "structure": "orc",
         "target_label": "moved_np_geomean_prob",
+        "embedded_label": "embedded_np_geomean_prob",
         "comparator_label": "vocab_np_geomean_prob",
         "target_mass": round(t_avg, 6),
         "target_mass_median": round(t_med, 6),
+        "embedded_mass": round(e_avg, 6) if e_avg == e_avg else float("nan"),
+        "embedded_mass_median": round(e_med, 6) if e_med == e_med else float("nan"),
         "vocab_mass": round(v_avg, 6),
         "vocab_mass_median": round(v_med, 6),
         "target_minus_vocab": round(t_avg - v_avg, 6),
+        "target_minus_embedded": round(t_avg - e_avg, 6) if e_avg == e_avg else float("nan"),
+        "embedded_minus_vocab": round(e_avg - v_avg, 6) if e_avg == e_avg else float("nan"),
         "roi_count": n,
         "checkpoint": str(ckpt_file),
     }
