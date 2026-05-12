@@ -8,7 +8,6 @@ At the ORC gap site (right after the embedded verb), compare probability mass of
        - animate moved NP  → verb-specific inanimate distractors
          e.g. after "eats": "the pizza", "the cake", "the bread"
        - inanimate moved NP → animate NPs from the standard vocab
-  3. other animate vocab NPs (non-filler, always computed for reference)
 
 The key question: does the model correctly predict the filler at the gap
 even when the embedded verb strongly selects for semantically incompatible objects?
@@ -36,49 +35,19 @@ from litgpt import Tokenizer
 
 from utils import (
     load_checkpoint,
-    normalize_word,
     np_chain_logprob,
     resolve_checkpoint_file,
     step_from_checkpoint,
 )
-
-# ---------------------------------------------------------------------------
-# Vocabulary
-# ---------------------------------------------------------------------------
-
-# Animate vocabulary — used both as comparators and for moved-NP identification
-ANIMATE_NOUNS = [
-    "student", "doctor", "pilot", "officer", "athlete", "artist",
-    "child", "girl", "boy", "patient", "client", "tourist",
-    "scientist", "engineer",
-]
-ANIMATE_SET = set(ANIMATE_NOUNS)
-
 
 CSV_FIELDS = [
     "step", "structure", "gap_verb",
     "moved_np", "moved_np_animacy",
     "moved_np_mass", "moved_np_mass_median",
     "distractor_mass", "distractor_mass_median",
-    "animate_other_mass", "animate_other_mass_median",
     "moved_minus_distractor",
-    "moved_minus_animate_other",
     "roi_count", "checkpoint",
 ]
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _build_np_token_lists(
-    nouns: List[str], tokenizer: Tokenizer
-) -> List[Tuple[str, List[int]]]:
-    """[(noun, token_ids_for_'the noun'), ...]"""
-    return [
-        (noun, tokenizer.encode(f" the {noun}", bos=False, eos=False).tolist())
-        for noun in nouns
-    ]
-
 
 # ---------------------------------------------------------------------------
 # Per-checkpoint evaluation
@@ -94,9 +63,6 @@ def compute_one_checkpoint(
     device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = Tokenizer(tokenizer_dir)
     model     = load_checkpoint(ckpt_file, device, max_seq_length)
-
-    # Pre-build animate NP token lists for animate_other computation
-    animate_np_list = _build_np_token_lists(ANIMATE_NOUNS, tokenizer)
 
     # Pre-tokenize every row from the CSV
     # Each item: (pre_gap_ids, moved_ids, distractor_ids_list, verb, moved_np_animacy)
@@ -120,7 +86,7 @@ def compute_one_checkpoint(
     if skipped:
         print(f"  [warn] {skipped} row(s) skipped (empty tokenisation)")
 
-    # Per-verb accumulator: verb → {moved, distractor, animate_other}
+    # Per-verb accumulator: verb → {moved, distractor}
     by_verb: Dict[str, Dict[str, List[float]]] = {}
 
     for batch_start in tqdm(range(0, len(items), batch_size), desc="  batches", leave=False):
@@ -153,21 +119,9 @@ def compute_one_checkpoint(
             if not distractor_probs:
                 continue
 
-            # --- Other animate NPs (non-filler, for reference) ---
-            moved_np_str   = tokenizer.decode(torch.tensor(moved_ids)).strip().lower()
-            moved_head     = moved_np_str.split()[-1]  # e.g. "the boy" → "boy"
-            animate_other_probs = [
-                geomean_prob(ids)
-                for noun, ids in animate_np_list
-                if normalize_word(noun) != moved_head and ids
-            ]
-
-            by_verb.setdefault(verb, {"moved": [], "distractor": [], "animate_other": [],
-                                       "animacy": animacy})
+            by_verb.setdefault(verb, {"moved": [], "distractor": [], "animacy": animacy})
             by_verb[verb]["moved"].append(moved_mass)
             by_verb[verb]["distractor"].append(statistics.mean(distractor_probs))
-            if animate_other_probs:
-                by_verb[verb]["animate_other"].append(statistics.mean(animate_other_probs))
 
     del model
     if device.type == "cuda":
@@ -177,7 +131,7 @@ def compute_one_checkpoint(
 
     # Build one row per verb (+ one "all" aggregate row)
     rows = []
-    all_moved, all_distractor, all_animate_other = [], [], []
+    all_moved, all_distractor = [], []
 
     for verb, vals in sorted(by_verb.items()):
         n = len(vals["moved"])
@@ -187,19 +141,15 @@ def compute_one_checkpoint(
         t_med = statistics.median(vals["moved"])
         d_avg = statistics.mean(vals["distractor"])
         d_med = statistics.median(vals["distractor"])
-        a_avg = statistics.mean(vals["animate_other"]) if vals["animate_other"] else float("nan")
-        a_med = statistics.median(vals["animate_other"]) if vals["animate_other"] else float("nan")
 
         all_moved.extend(vals["moved"])
         all_distractor.extend(vals["distractor"])
-        all_animate_other.extend(vals["animate_other"])
 
         animacy_label = vals.get("animacy", "animate")
         print(
             f"  step {step} | {verb:10s}: "
             f"moved={t_avg:.6f} (med={t_med:.6f}), "
-            f"distractor={d_avg:.6f} (med={d_med:.6f}), "
-            f"animate_other={a_avg:.6f} (med={a_med:.6f}), n={n}"
+            f"distractor={d_avg:.6f} (med={d_med:.6f}), n={n}"
         )
         rows.append({
             "step": step,
@@ -211,10 +161,7 @@ def compute_one_checkpoint(
             "moved_np_mass_median": round(t_med, 6),
             "distractor_mass": round(d_avg, 6),
             "distractor_mass_median": round(d_med, 6),
-            "animate_other_mass": round(a_avg, 6) if a_avg == a_avg else float("nan"),
-            "animate_other_mass_median": round(a_med, 6) if a_med == a_med else float("nan"),
             "moved_minus_distractor": round(t_avg - d_avg, 6),
-            "moved_minus_animate_other": round(t_avg - a_avg, 6) if a_avg == a_avg else float("nan"),
             "roi_count": n,
             "checkpoint": str(ckpt_file),
         })
@@ -225,28 +172,22 @@ def compute_one_checkpoint(
         t_med = statistics.median(all_moved)
         d_avg = statistics.mean(all_distractor)
         d_med = statistics.median(all_distractor)
-        a_avg = statistics.mean(all_animate_other) if all_animate_other else float("nan")
-        a_med = statistics.median(all_animate_other) if all_animate_other else float("nan")
         print(
             f"  step {step} | {'ALL':10s}: "
             f"moved={t_avg:.6f} (med={t_med:.6f}), "
-            f"distractor={d_avg:.6f} (med={d_med:.6f}), "
-            f"animate_other={a_avg:.6f} (med={a_med:.6f}), n={len(all_moved)}"
+            f"distractor={d_avg:.6f} (med={d_med:.6f}), n={len(all_moved)}"
         )
         rows.append({
             "step": step,
             "structure": "orc",
             "gap_verb": "ALL",
             "moved_np": "filler",
-            "moved_np_animacy": "animate",
+            "moved_np_animacy": "mixed",
             "moved_np_mass": round(t_avg, 6),
             "moved_np_mass_median": round(t_med, 6),
             "distractor_mass": round(d_avg, 6),
             "distractor_mass_median": round(d_med, 6),
-            "animate_other_mass": round(a_avg, 6) if a_avg == a_avg else float("nan"),
-            "animate_other_mass_median": round(a_med, 6) if a_med == a_med else float("nan"),
             "moved_minus_distractor": round(t_avg - d_avg, 6),
-            "moved_minus_animate_other": round(t_avg - a_avg, 6) if a_avg == a_avg else float("nan"),
             "roi_count": len(all_moved),
             "checkpoint": str(ckpt_file),
         })
