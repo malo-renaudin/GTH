@@ -15,4 +15,4 @@
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
-python eval_blimp.py --checkpoint-dir out/pretrain/gpt_baseline_2 --blimp-dir blimp_data --batch-size 512 --output-csv blimp_baseline.csv
+python eval_blimp.py --checkpoint-dir out/pretrain/gpt_baseline_3 --blimp-dir blimp_data --batch-size 512 --output-csv blimp_baseline_3.csv
