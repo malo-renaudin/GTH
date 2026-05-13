@@ -55,7 +55,7 @@ data:
     data_path: chunked_data_baseline
     
     # If your folder contains 'train' and 'val' subfolders, specify them here:
-    split_names: ["train", "val"]
+    split_names: ["train", "valid"]
     
     seed: 2357
 
