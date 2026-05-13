@@ -65,11 +65,11 @@ train:
 
 
   # Number of optimizer steps between saving checkpoints (type: Optional[int], default: 1000)
-  save_interval: 10
+  save_interval: 50
 
 
   # Number of iterations between logging calls (type: int, default: 1)
-  log_interval: 10
+  log_interval: 50
 
 
   # Number of samples between optimizer steps across data-parallel ranks (type: int, default: 512)
