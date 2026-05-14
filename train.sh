@@ -15,4 +15,4 @@
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
-litgpt pretrain --config gpt_baseline_3.yaml
+litgpt pretrain --config babylm_gpt2_100m.yaml
