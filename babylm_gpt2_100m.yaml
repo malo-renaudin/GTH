@@ -18,7 +18,7 @@ model_config:
 
 out_dir: out/pretrain/babylm_gpt2_100m
 precision: bf16-mixed
-resume: true
+resume: false
 
 data:
   class_path: litgpt.data.LitData
