@@ -6,7 +6,6 @@
 #SBATCH --job-name=grid-pretrain
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
 #SBATCH --time=48:00:00
 #SBATCH --output=logs/grid_%A_%a.out
 #SBATCH --error=logs/grid_%A_%a.err
