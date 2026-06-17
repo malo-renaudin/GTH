@@ -1,10 +1,8 @@
-#!/usr/bin/env bash
-# SLURM array submission wrapper for grid configs produced by `scripts/make_grid_configs.py`.
-# Usage (submit as an array job):
-#   sbatch --array=1-N submit_grid.sh
-# Or run locally for a single index: ./submit_grid.sh 1
-
-# Example SBATCH header (uncomment and adapt to your cluster):
+#!/usr/bin/bash
+#SBATCH --account=ywa@h100
+#SBATCH --partition=gpu_p6
+#SBATCH --qos=qos_gpu_h100-t3
+#SBATCH --constraint=h100
 #SBATCH --job-name=grid-pretrain
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -69,3 +67,13 @@ else
 fi
 
 echo "Job finished for index $TASK_ID" >&2
+
+# Record final metrics (train/valid perplexity) into CSV
+PY=python3
+RESULTS_CSV="configs/grid/results.csv"
+if command -v $PY >/dev/null 2>&1; then
+  echo "Recording final metrics to $RESULTS_CSV" >&2
+  $PY scripts/record_final_metrics.py --config "$CONFIG" --out-dir "$OUT_DIR" --results-csv "$RESULTS_CSV" || echo "Failed to record metrics" >&2
+else
+  echo "Python not found; skipping metrics recording" >&2
+fi
