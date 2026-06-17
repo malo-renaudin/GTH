@@ -1,0 +1,54 @@
+model_name: gpt2-124M
+model_config:
+  name: gpt2-124M
+  block_size: 512
+  vocab_size: 50257
+  padded_vocab_size: 50304
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+  head_size: 64
+  norm_class_name: LayerNorm
+  mlp_class_name: GptNeoxMLP
+  bias: false
+  lm_head_bias: false
+  norm_eps: 1e-5
+out_dir: out/pretrain/grid/babylm_gpt2_100m_exp035
+precision: bf16-mixed
+resume: false
+data:
+  class_path: litgpt.data.LitData
+  init_args:
+    data_path: chunked_data_baseline
+    split_names:
+    - train
+    - valid
+    seed: 2357
+train:
+  save_interval: 1000000000
+  log_interval: 1000
+  global_batch_size: 8
+  micro_batch_size: 8
+  lr_warmup_steps: 500
+  max_seq_length: 512
+  max_norm: 0.5
+  min_lr: 5e-5
+  max_tokens: 100000000
+eval:
+  interval: 1000
+  max_iters: 100
+  initial_validation: true
+  final_validation: false
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 5.0e-05
+    weight_decay: 0.01
+    betas:
+    - 0.9
+    - 0.999
+devices: auto
+num_nodes: 1
+tokenizer_dir: checkpoints/gpt2
+logger_name: tensorboard
+seed: 42
