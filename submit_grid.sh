@@ -1,9 +1,10 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 #SBATCH --account=ywa@h100
 #SBATCH --partition=gpu_p6
 #SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --constraint=h100
 #SBATCH --job-name=grid-pretrain
+#SBATCH --array=1-48
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=20:00:00
@@ -12,67 +13,67 @@
 
 set -euo pipefail
 
+cd "${SLURM_SUBMIT_DIR}"
+
 MANIFEST="configs/grid/manifest.tsv"
 
 if [[ ! -f "$MANIFEST" ]]; then
-  echo "Manifest not found: $MANIFEST"
-  exit 1
+    echo "Manifest not found: $MANIFEST" >&2
+    exit 1
 fi
 
-TASK_ID=${SLURM_ARRAY_TASK_ID:-${1:-}}
-if [[ -z "$TASK_ID" ]]; then
-  echo "Provide SLURM_ARRAY_TASK_ID or pass index as first arg" >&2
-  exit 1
-fi
+TASK_ID="${SLURM_ARRAY_TASK_ID}"
 
 LINE=$(sed -n "${TASK_ID}p" "$MANIFEST")
+
 if [[ -z "$LINE" ]]; then
-  echo "No manifest line for index $TASK_ID" >&2
-  exit 1
+    echo "No manifest line for index $TASK_ID" >&2
+    exit 1
 fi
 
-CONFIG=$(echo "$LINE" | awk -F"\t" '{print $1}')
-OUT_DIR=$(echo "$LINE" | awk -F"\t" '{print $2}')
+IFS=$'\t' read -r CONFIG OUT_DIR <<< "$LINE"
 
 if [[ ! -f "$CONFIG" ]]; then
-  echo "Config not found: $CONFIG" >&2
-  exit 1
+    echo "Config not found: $CONFIG" >&2
+    exit 1
 fi
 
-echo "Running config: $CONFIG" >&2
-echo "Out dir: $OUT_DIR" >&2
+echo "[$(date)] Task $TASK_ID"
+echo "Config: $CONFIG"
+echo "Out dir: $OUT_DIR"
 
-# Run training (assumes `litgpt` is on PATH and env is set up)
 litgpt pretrain --config "$CONFIG"
 
-# After successful run, keep only the final step-* checkpoint directory
 if [[ -d "$OUT_DIR" ]]; then
-  cd "$OUT_DIR"
-  # find last step directory (lexicographic numeric sort)
-  last=$(ls -d step-* 2>/dev/null | sort -V | tail -n1 || true)
-  if [[ -n "$last" ]]; then
-    echo "Keeping final checkpoint: $last" >&2
-    for d in step-*; do
-      if [[ "$d" != "$last" ]]; then
-        echo "Removing $d" >&2
-        rm -rf "$d"
-      fi
-    done
-  else
-    echo "No step-* directories found in $OUT_DIR" >&2
-  fi
+    cd "$OUT_DIR"
+
+    last=$(find . -maxdepth 1 -type d -name 'step-*' \
+        | sed 's|^\./||' \
+        | sort -V \
+        | tail -n1)
+
+    if [[ -n "$last" ]]; then
+        echo "Keeping final checkpoint: $last"
+
+        find . -maxdepth 1 -type d -name 'step-*' ! -name "$last" \
+            -exec rm -rf {} +
+    else
+        echo "No step-* directories found"
+    fi
 else
-  echo "Out dir does not exist: $OUT_DIR" >&2
+    echo "Out dir does not exist: $OUT_DIR" >&2
 fi
 
-echo "Job finished for index $TASK_ID" >&2
+echo "Job finished for index $TASK_ID"
 
-# Record final metrics (train/valid perplexity) into CSV
-PY=python3
-RESULTS_CSV="configs/grid/results.csv"
-if command -v $PY >/dev/null 2>&1; then
-  echo "Recording final metrics to $RESULTS_CSV" >&2
-  $PY scripts/record_final_metrics.py --config "$CONFIG" --out-dir "$OUT_DIR" --results-csv "$RESULTS_CSV" || echo "Failed to record metrics" >&2
+RESULTS_CSV="${SLURM_SUBMIT_DIR}/configs/grid/results.csv"
+
+if command -v python3 >/dev/null 2>&1; then
+    python3 "${SLURM_SUBMIT_DIR}/scripts/record_final_metrics.py" \
+        --config "$CONFIG" \
+        --out-dir "$OUT_DIR" \
+        --results-csv "$RESULTS_CSV" \
+    || echo "Failed to record metrics" >&2
 else
-  echo "Python not found; skipping metrics recording" >&2
+    echo "Python not found; skipping metrics recording" >&2
 fi
