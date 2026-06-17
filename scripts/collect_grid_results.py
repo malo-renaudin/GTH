@@ -134,8 +134,23 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
             try:
                 from eval_short_nested_outer import load_examples, compute_one_checkpoint
             except Exception as e:
-                print("Could not import eval_short_nested_outer:", e, file=sys.stderr)
-                run_eval = False
+                # fallback: try loading the file by path (useful when cwd/import path differs)
+                try:
+                    import importlib.util
+                    repo_root = Path(__file__).resolve().parent.parent
+                    alt_path = repo_root / "eval_short_nested_outer.py"
+                    if alt_path.exists():
+                        spec = importlib.util.spec_from_file_location("eval_short_nested_outer", str(alt_path))
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        load_examples = module.load_examples
+                        compute_one_checkpoint = module.compute_one_checkpoint
+                    else:
+                        raise FileNotFoundError(f"Fallback file not found: {alt_path}")
+                except Exception as e2:
+                    print("Could not import eval_short_nested_outer:", e, file=sys.stderr)
+                    print("Fallback import failed:", e2, file=sys.stderr)
+                    run_eval = False
             else:
                 examples = load_examples(str(eval_data))
                 ckpt = d / "final" / "lit_model.pth"
@@ -167,14 +182,12 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
 
         row = {
             "exp": name,
-            "out_dir": str(d),
             "lr": lr,
             "weight_decay": weight_decay,
             "lr_warmup_steps": lr_warmup,
             "global_batch_size": global_batch,
             "micro_batch_size": micro_batch,
             "max_norm": max_norm,
-            "precision": precision,
             "train_loss": train_loss,
             "val_loss": val_loss,
             "step": step,
