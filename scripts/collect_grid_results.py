@@ -34,7 +34,15 @@ def read_hyperparams(p: Path) -> dict:
     f = p / "final" / "hyperparameters.yaml"
     if not f.exists():
         return {}
-    return yaml.safe_load(f)
+    try:
+        with f.open("r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+    except Exception:
+        # fallback: return raw text parsed as YAML if possible
+        try:
+            return yaml.safe_load(f.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
 
 
 def find_event_files(p: Path):
