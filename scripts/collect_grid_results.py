@@ -147,15 +147,39 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
                 else:
                     print(f"Checkpoint not found for {d}: {ckpt}", file=sys.stderr)
 
+        # Extract only grid hyperparameters (lr, warmup, batch, weight_decay, max_norm, precision)
+        try:
+            opt_init = hp.get("optimizer", {}).get("init_args", {}) if isinstance(hp, dict) else {}
+        except Exception:
+            opt_init = {}
+        try:
+            train_cfg = hp.get("train", {}) if isinstance(hp, dict) else {}
+        except Exception:
+            train_cfg = {}
+
+        lr = opt_init.get("lr")
+        weight_decay = opt_init.get("weight_decay")
+        lr_warmup = train_cfg.get("lr_warmup_steps")
+        global_batch = train_cfg.get("global_batch_size")
+        micro_batch = train_cfg.get("micro_batch_size")
+        max_norm = train_cfg.get("max_norm")
+        precision = hp.get("precision") if isinstance(hp, dict) else None
+
         row = {
             "exp": name,
             "out_dir": str(d),
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "lr_warmup_steps": lr_warmup,
+            "global_batch_size": global_batch,
+            "micro_batch_size": micro_batch,
+            "max_norm": max_norm,
+            "precision": precision,
             "train_loss": train_loss,
             "val_loss": val_loss,
             "step": step,
             "overall_acc": overall,
             "per_category": json.dumps(per_cat, ensure_ascii=False),
-            "hyperparams": json.dumps(hp, ensure_ascii=False),
         }
         rows.append(row)
         if dry_run:
@@ -164,7 +188,22 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
     if not dry_run:
         results_csv.parent.mkdir(parents=True, exist_ok=True)
         with results_csv.open("w", newline="", encoding="utf-8") as f:
-            fieldnames = ["exp", "out_dir", "train_loss", "val_loss", "step", "overall_acc", "per_category", "hyperparams"]
+            fieldnames = [
+                "exp",
+                "out_dir",
+                "lr",
+                "weight_decay",
+                "lr_warmup_steps",
+                "global_batch_size",
+                "micro_batch_size",
+                "max_norm",
+                "precision",
+                "train_loss",
+                "val_loss",
+                "step",
+                "overall_acc",
+                "per_category",
+            ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for r in rows:
