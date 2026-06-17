@@ -11,6 +11,9 @@
 #SBATCH --output=logs/grid_%A_%a.out
 #SBATCH --error=logs/grid_%A_%a.err
 
+source $WORK/miniconda3/etc/profile.d/conda.sh
+conda activate litgpt_jz
+
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
