@@ -143,9 +143,9 @@ def main():
     g.add_argument('--checkpoint', type=Path)
     g.add_argument('--checkpoint-dir', type=Path)
     p.add_argument('--tokenizer-dir', type=Path, default=Path('checkpoints/gpt2'))
-    p.add_argument('--data', default='short_nested_outer_english.json')
+    p.add_argument('--data', default='short_nested_inner_english.json')
     p.add_argument('--max-seq-length', type=int, default=0)
-    p.add_argument('--result-name', type=Path, default=Path('results/eval_short_nested_outer.csv'))
+    p.add_argument('--result-name', type=Path, default=Path('results/eval_short_nested_inner.csv'))
     args = p.parse_args()
 
     examples = load_examples(args.data)
