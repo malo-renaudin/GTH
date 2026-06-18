@@ -22,7 +22,7 @@ from pathlib import Path
 import re
 import sys
 from eval_short_nested_outer import load_examples, compute_one_checkpoint
-
+from tqdm import tqdm
 import yaml
 
 try:
@@ -102,7 +102,7 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
     dirs = sorted([d for d in grid_root.iterdir() if d.is_dir()])
     if dry_run:
         print(f"Found {len(dirs)} experiment dirs under {grid_root}")
-    for d in dirs:
+    for d in tqdm(dirs, desc="Experiments", unit="exp"):
         name = d.name
         hp = read_hyperparams(d)
         event_files = find_event_files(d)
