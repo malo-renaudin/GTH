@@ -44,7 +44,7 @@ def compute_one_checkpoint(
 
     # Pre-tokenize
     items = []
-    for ex in examples:
+    for i, ex in enumerate(examples):
         pre_ids = tokenizer.encode(ex['input'], bos=True, eos=False).tolist()
         cand_lists = [tokenizer.encode(' ' + c, bos=False, eos=False).tolist() for c in ex['target_scores'].keys()]
         if not pre_ids or not cand_lists:
@@ -60,7 +60,12 @@ def compute_one_checkpoint(
         ctx = torch.tensor([pre_ids], device=device)
         with torch.no_grad():
             logits = model(ctx)
-        sp = torch.softmax(logits[0, -1, :], dim=-1)
+        # defensive: ensure logits shape is as expected before indexing
+        try:
+            sp = torch.softmax(logits[0, -1, :], dim=-1)
+        except Exception as e:
+            print(f"Debug: skipping example due to logits indexing error; logits_shape={None if logits is None else tuple(logits.shape)}; pre_ids_len={len(pre_ids)}; error={e}", file=sys.stderr)
+            continue
 
         best_c = None
         best_score = -float('inf')
@@ -102,8 +107,13 @@ def compute_one_checkpoint(
         best_score = -float('inf')
         for key, ids in zip(cand_keys, cand_lists):
             prob = np_chain_logprob(model, ctx, ids, device, first_step_probs=sp)
+        print(f"DEBUG example={i} input_len={len(pre_ids)} num_cands={len(cand_lists)} device={device}", file=sys.stderr)
+        if cand_lists:
+            print(f"DEBUG first_cand_len={len(cand_lists[0])} first_cand_ids={cand_lists[0][:8]}", file=sys.stderr)
             score = prob ** (1.0 / len(ids)) if ids else 0.0
             if score > best_score:
+                print(f"DEBUG calling model with ctx_shape={(ctx.shape)}", file=sys.stderr)
+                print(f"DEBUG logits_shape={None if logits is None else tuple(logits.shape)}", file=sys.stderr)
                 best_score = score
                 best_c = key
 
