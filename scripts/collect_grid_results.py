@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import sys
+from eval_short_nested_outer import load_examples, compute_one_checkpoint
 
 import yaml
 
@@ -28,6 +29,13 @@ try:
     from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 except Exception:
     EventAccumulator = None
+
+# Ensure the repository root is on sys.path so imports like
+# `import eval_short_nested_outer` and `import utils` work when this
+# script is executed from `scripts/` or as a module.
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 
 def read_hyperparams(p: Path) -> dict:
@@ -46,7 +54,7 @@ def read_hyperparams(p: Path) -> dict:
 
 
 def find_event_files(p: Path):
-    tb = p / "logs" / "tensorboard"
+    tb = p / "logs" / "tensorboard"/"version_0"
     if not tb.exists():
         return []
     return list(tb.glob("*event*"))
@@ -88,26 +96,6 @@ def extract_losses_from_events(event_files):
     return train_loss, val_loss
 
 
-def fallback_parse_logs(p: Path):
-    # look for any .txt under out dir and regex for 'loss' floats
-    train_loss = None
-    val_loss = None
-    for txt in p.rglob("*.txt"):
-        try:
-            s = txt.read_text(errors="ignore")
-        except Exception:
-            continue
-        # find patterns like 'train loss: 1.2345' or 'val loss: 1.23'
-        m = re.search(r"train[^0-9\n]{0,10}loss[^0-9\n]{0,10}([0-9]+\.?[0-9]*)", s, re.I)
-        if m:
-            train_loss = float(m.group(1))
-        m2 = re.search(r"(val|valid|validation)[^0-9\n]{0,10}loss[^0-9\n]{0,10}([0-9]+\.?[0-9]*)", s, re.I)
-        if m2:
-            val_loss = float(m2.group(2))
-        if train_loss and val_loss:
-            break
-    return train_loss, val_loss
-
 
 def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, tokenizer_dir: Path, eval_data: Path, max_seq_length: int):
     rows = []
@@ -119,39 +107,14 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
         hp = read_hyperparams(d)
         event_files = find_event_files(d)
         train_loss = val_loss = None
-        if event_files:
-            train_loss, val_loss = extract_losses_from_events(event_files)
-        if train_loss is None and val_loss is None:
-            t1, v1 = fallback_parse_logs(d)
-            train_loss = train_loss or t1
-            val_loss = val_loss or v1
+        train_loss, val_loss = extract_losses_from_events(event_files)
+      
 
         step = ""
         overall = ""
         per_cat = {}
         if run_eval:
-            # import eval functions lazily to avoid heavy imports in dry-run
-            try:
-                from eval_short_nested_outer import load_examples, compute_one_checkpoint
-            except Exception as e:
-                # fallback: try loading the file by path (useful when cwd/import path differs)
-                try:
-                    import importlib.util
-                    repo_root = Path(__file__).resolve().parent.parent
-                    alt_path = repo_root / "eval_short_nested_outer.py"
-                    if alt_path.exists():
-                        spec = importlib.util.spec_from_file_location("eval_short_nested_outer", str(alt_path))
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
-                        load_examples = module.load_examples
-                        compute_one_checkpoint = module.compute_one_checkpoint
-                    else:
-                        raise FileNotFoundError(f"Fallback file not found: {alt_path}")
-                except Exception as e2:
-                    print("Could not import eval_short_nested_outer:", e, file=sys.stderr)
-                    print("Fallback import failed:", e2, file=sys.stderr)
-                    run_eval = False
-            else:
+
                 examples = load_examples(str(eval_data))
                 ckpt = d / "final" / "lit_model.pth"
                 if ckpt.exists():
@@ -178,7 +141,6 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
         global_batch = train_cfg.get("global_batch_size")
         micro_batch = train_cfg.get("micro_batch_size")
         max_norm = train_cfg.get("max_norm")
-        precision = hp.get("precision") if isinstance(hp, dict) else None
 
         row = {
             "exp": name,
@@ -203,14 +165,12 @@ def collect(grid_root: Path, results_csv: Path, dry_run: bool, run_eval: bool, t
         with results_csv.open("w", newline="", encoding="utf-8") as f:
             fieldnames = [
                 "exp",
-                "out_dir",
                 "lr",
                 "weight_decay",
                 "lr_warmup_steps",
                 "global_batch_size",
                 "micro_batch_size",
                 "max_norm",
-                "precision",
                 "train_loss",
                 "val_loss",
                 "step",
