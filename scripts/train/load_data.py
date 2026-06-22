@@ -33,5 +33,38 @@ def tokenize(batch):
 tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
 
+block_size = 1024  # or 1024 on H100
 
-tokenized.save_to_disk(args.cache_dir + f"/{args.dataset_name}")
+def group_texts(examples):
+    concatenated = {}
+    
+    # flatten all sentences into one stream
+    for k in examples.keys():
+        concatenated[k] = sum(examples[k], [])
+
+    total_length = len(concatenated["input_ids"])
+
+    # cut to multiple of block_size
+    total_length = (total_length // block_size) * block_size
+
+    # split into fixed-length chunks
+    result = {
+        k: [
+            t[i:i + block_size]
+            for i in range(0, total_length, block_size)
+        ]
+        for k, t in concatenated.items()
+    }
+
+    return result
+
+
+packed = tokenized.map(
+    group_texts,
+    batched=True
+)
+
+# =========================
+# SAVE PACKED DATASET
+# =========================
+packed.save_to_disk(args.cache_dir + f"/{args.dataset_name}_packed")
