@@ -30,12 +30,9 @@ model.config.use_cache = False
 tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
 tokenizer.pad_token = tokenizer.eos_token
 
-data_collator = DataCollatorForLanguageModeling(
-    tokenizer=tokenizer,
-    mlm=False
-)
 
-lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}")
+
+lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}_packed")
 
 training_args = TrainingArguments(
     output_dir=config.get("output_dir", "gpt2-out"),
@@ -55,6 +52,7 @@ training_args = TrainingArguments(
     max_grad_norm=config.get("max_grad_norm", 1),
     gradient_accumulation_steps = 16,
     bf16=True, 
+    optim="adamw_torch_fused",
     load_best_model_at_end=True,   # IMPORTANT
     metric_for_best_model="eval_loss",
     greater_is_better=False,
@@ -66,8 +64,6 @@ trainer = Trainer(
     args=training_args,
     train_dataset=lm_datasets["train"],
     eval_dataset=lm_datasets["validation"],
-    data_collator=data_collator,
-    # tokenizer=tokenizer,
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
 )
 
