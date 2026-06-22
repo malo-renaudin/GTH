@@ -35,7 +35,7 @@ from litgpt import Tokenizer
 from litgpt.config import Config
 from litgpt.model import GPT
 
-from eval_test import (
+from scripts.eval.eval_test import (
     _word_token_spans, lexical_mass, extract_orc_moved_np,
     nouns_orc, verbs_orc, verbs_orc_continuation,
 )

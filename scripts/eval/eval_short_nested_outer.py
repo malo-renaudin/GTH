@@ -14,11 +14,11 @@ import csv
 from collections import defaultdict
 from pathlib import Path
 from typing import List, Dict
-
+import sys
 import torch
 
 from litgpt import Tokenizer
-from utils import (
+from scripts.utils import (
     load_checkpoint,
     np_chain_logprob,
     resolve_checkpoint_file,

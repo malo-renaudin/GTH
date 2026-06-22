@@ -25,3 +25,7 @@ tests/datasets
 *.out
 *.npz
 events.out.tfevents*
+scripts/train/gpt2-out/*
+scripts/train/.cache/*
+scripts/train/overfit_test/*
+scripts/train/=1.1.0

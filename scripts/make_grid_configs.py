@@ -18,7 +18,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--base", type=Path, default=Path("babylm_gpt2_100m.yaml"))
     p.add_argument("--out-dir", type=Path, default=Path("configs/grid"))
-    p.add_argument("--max-tokens", type=int, default=100_000_000)
+    p.add_argument("--max-tokens", type=int, default=1_000_000_000)
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 
@@ -63,7 +63,7 @@ def main():
         train["save_interval"] = 10**9
 
         new["precision"] = prec
-        new["resume"] = False
+        new["resume"] = True
 
         out_dir = Path(new.get("out_dir", "out/pretrain/grid"))
         # unique out_dir per experiment

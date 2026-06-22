@@ -38,6 +38,16 @@ n = count_lines(declaratives_from_orc) + count_lines(declaratives_from_wh)
 
 start_orc_freq = 0.84/100
 start_wh_freq= 0.9/100
+
+def preprocess_sentence(line):
+    line = line.strip()
+    line = line.replace("<unk>", "")
+    line = line.replace("<eos>", "<|endoftext|>")
+    # ensure <|endoftext|> at the end
+    if not line.endswith("<|endoftext|>"):
+        line = line + " <|endoftext|>"
+    return line + "\n"
+
 #function to augment 1 target frequency (enough for now, but will need improvement fast enough)
 def augment_dataset(N, n, start_freq, target_freq, base_dataset, target_dataset, declaratives_from_wh, declaratives_from_orc):
     raw_n_target_to_add = int(round((target_freq - start_freq) * N + target_freq * n))
@@ -66,14 +76,14 @@ def augment_dataset(N, n, start_freq, target_freq, base_dataset, target_dataset,
     random.shuffle(declaratives)
     random.shuffle(target)
 
-    sentences_to_add = declaratives[:n_declaratives_to_add] + target[:n_target_to_add]
+    sentences_to_add = [preprocess_sentence(s) for s in declaratives[:n_declaratives_to_add] + target[:n_target_to_add]]
     print(
         f"Requested target additions={raw_n_target_to_add}; using {n_target_to_add} target + "
         f"{n_declaratives_to_add} declaratives (total added={len(sentences_to_add)})."
     )
 
     with open(base_dataset, "r") as f:
-        base = f.readlines()
+        base = [preprocess_sentence(line) for line in f]
     final = base + sentences_to_add
     random.shuffle(final)
     return final

@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+import argparse
+import random
+from pathlib import Path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Create a held-out set from wh5/orc7 excluding sentences already present in a train file."
+    )
+    parser.add_argument(
+        "--source-file",
+        #"--wh-file",
+        dest="source_file",
+        type=Path,
+        default=None,
+        help="Path to source file. If omitted, chosen from --structure.",
+    )
+    parser.add_argument(
+        "--structure",
+        type=str,
+        choices=["wh", "orc"],
+        default="wh",
+        help="Source structure preset used when --source-file is not provided.",
+    )
+    parser.add_argument(
+        "--train-file",
+        type=Path,
+        default=Path("data/english_data/train_orc_6_72_wh_baseline_augmented.txt"),
+        help="Path to train file used for exclusion.",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        default=None,
+        help="Path to output file. If omitted, generated from structure and set name.",
+    )
+    parser.add_argument(
+        "--set-name",
+        type=str,
+        default="valid",
+        help="Logical split name used in output filename (e.g., valid, test).",
+    )
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=1000,
+        help="Number of sentences to extract.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible sampling.",
+    )
+    return parser.parse_args()
+
+
+def read_lines(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8") as f:
+        return [line.rstrip("\n") for line in f if line.strip()]
+
+
+def infer_train_tag(train_file: Path) -> str:
+    tag = train_file.stem
+
+    if tag.startswith("train_"):
+        tag = tag[len("train_") :]
+
+    if tag.endswith("_augmented"):
+        tag = tag[: -len("_augmented")]
+
+    # For names like "orc_baseline_wh_7_20", keep the condition after baseline.
+    if "_baseline_" in tag:
+        tag = tag.split("_baseline_", 1)[1]
+    elif tag.endswith("_baseline"):
+        tag = tag[: -len("_baseline")]
+
+    return tag or "train"
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.n <= 0:
+        raise ValueError("--n must be a positive integer.")
+
+    if args.source_file is None:
+        if args.structure == "wh":
+            source_file = Path("generate_simple_datasets/generated_simple_datasets/wh5.txt")
+            source_tag = "wh5"
+        else:
+            source_file = Path("generate_simple_datasets/generated_simple_datasets/orc7.txt")
+            source_tag = "orc7"
+    else:
+        source_file = args.source_file
+        source_tag = source_file.stem
+
+    if args.output_file is None:
+        train_tag = infer_train_tag(args.train_file)
+        output_file = Path(
+            f"data/english_data/{args.set_name}_{source_tag}_not_in_{train_tag}.txt"
+        )
+    else:
+        output_file = args.output_file
+
+    source_lines = read_lines(source_file)
+    train_lines = set(read_lines(args.train_file))
+
+    # Keep source order while removing duplicates and train overlaps.
+    candidates = []
+    seen = set()
+    for sentence in source_lines:
+        if sentence in train_lines or sentence in seen:
+            continue
+        seen.add(sentence)
+        candidates.append(sentence)
+
+    if len(candidates) < args.n:
+        raise ValueError(
+            f"Not enough candidates: requested {args.n}, found {len(candidates)}."
+        )
+
+    rng = random.Random(args.seed)
+    selected = rng.sample(candidates, args.n)
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with output_file.open("w", encoding="utf-8") as f:
+        for sentence in selected:
+            f.write(sentence + "\n")
+
+    print(
+        f"Wrote {len(selected)} sentences to {output_file} "
+        f"(from {len(candidates)} eligible candidates)."
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 import re
 import sys
-from eval_short_nested_outer import load_examples, compute_one_checkpoint
+from scripts.eval.eval_short_nested_outer import load_examples, compute_one_checkpoint
 from tqdm import tqdm
 import yaml
 
