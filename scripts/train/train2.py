@@ -47,16 +47,19 @@ training_args = TrainingArguments(
     learning_rate=config.get("learning_rate", 5e-5),#grid
     num_train_epochs=config.get("num_train_epochs", 3),
     weight_decay=config.get("weight_decay", 0.01),#grid
-    warmup_steps=config.get("warmup_steps", 100),#grid
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
-    gradient_accumulation_steps = 16,
+    dataloader_num_workers=4,
+    dataloader_prefetch_factor=2,
+    dataloader_pin_memory=True,
+    remove_unused_columns=False,
+    gradient_accumulation_steps = 2,
     bf16=True, 
     optim="adamw_torch_fused",
     load_best_model_at_end=True,   # IMPORTANT
     metric_for_best_model="eval_loss",
     greater_is_better=False,
-    
+    warmup_ratio=config.get("warmup_ratio", 0.1),
 )
 
 trainer = Trainer(
