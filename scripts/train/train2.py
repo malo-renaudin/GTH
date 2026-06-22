@@ -48,7 +48,6 @@ training_args = TrainingArguments(
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
     bf16=True, 
-    num_train_epochs = config.get("num_train_epochs", 3),
     load_best_model_at_end=True,   # IMPORTANT
     metric_for_best_model="eval_loss",
     greater_is_better=False,
