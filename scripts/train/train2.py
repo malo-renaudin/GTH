@@ -24,6 +24,9 @@ config = yaml.safe_load(open(args.config))
 hf_config = AutoConfig.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
 model = AutoModelForCausalLM.from_config(hf_config)
 
+model.gradient_checkpointing_enable()
+model.config.use_cache = False
+
 tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
 tokenizer.pad_token = tokenizer.eos_token
 
@@ -50,6 +53,7 @@ training_args = TrainingArguments(
     warmup_steps=config.get("warmup_steps", 100),#grid
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
+    gradient_accumulation_steps = 16,
     bf16=True, 
     load_best_model_at_end=True,   # IMPORTANT
     metric_for_best_model="eval_loss",
