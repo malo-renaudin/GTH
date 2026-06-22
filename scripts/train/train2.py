@@ -24,7 +24,7 @@ config = yaml.safe_load(open(args.config))
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
                                        local_files_only=True,
-                                       attn_implementation="flash_attention_2")
+                                       attn_implementation="sdpa")
 model = AutoModelForCausalLM.from_config(hf_config)
 
 model.gradient_checkpointing_enable()
@@ -70,7 +70,8 @@ trainer = Trainer(
     args=training_args,
     train_dataset=lm_datasets["train"],
     eval_dataset=lm_datasets["validation"],
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
+    data_collator = None,
 )
 
 trainer.train()
