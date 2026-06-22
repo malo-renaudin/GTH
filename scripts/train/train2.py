@@ -21,7 +21,10 @@ args = argument_parser.parse_args()
 
 config = yaml.safe_load(open(args.config))
 
-hf_config = AutoConfig.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
+hf_config = AutoConfig.from_pretrained(args.model_name, 
+                                       cache_dir= args.cache_dir, 
+                                       local_files_only=True,
+                                       attn_implementation="flash_attention_2")
 model = AutoModelForCausalLM.from_config(hf_config)
 
 model.gradient_checkpointing_enable()
