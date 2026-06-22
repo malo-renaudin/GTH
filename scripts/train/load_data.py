@@ -37,26 +37,32 @@ block_size = 1024  # or 1024 on H100
 
 def group_texts(examples):
     concatenated = {}
-    
-    # flatten all sentences into one stream
+
     for k in examples.keys():
         concatenated[k] = sum(examples[k], [])
 
     total_length = len(concatenated["input_ids"])
-
-    # cut to multiple of block_size
     total_length = (total_length // block_size) * block_size
 
-    # split into fixed-length chunks
-    result = {
-        k: [
-            t[i:i + block_size]
-            for i in range(0, total_length, block_size)
-        ]
-        for k, t in concatenated.items()
-    }
+    input_ids = [
+        concatenated["input_ids"][i:i + block_size]
+        for i in range(0, total_length, block_size)
+    ]
 
-    return result
+    attention_mask = [
+        [1] * block_size
+        for _ in range(len(input_ids))
+    ]
+
+    labels = [
+        x.copy() for x in input_ids
+    ]
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,   # ← THIS FIXES YOUR ERROR
+    }
 
 
 packed = tokenized.map(
