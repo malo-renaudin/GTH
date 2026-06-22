@@ -63,7 +63,7 @@ trainer = Trainer(
     train_dataset=lm_datasets["train"],
     eval_dataset=lm_datasets["validation"],
     data_collator=data_collator,
-    tokenizer=tokenizer,
+    # tokenizer=tokenizer,
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
 )
 
