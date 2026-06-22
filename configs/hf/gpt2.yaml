@@ -2,9 +2,9 @@
 output_dir: /lustre/fswork/projects/rech/ywa/uds37kc/GTH/results/gpt2_hf
 
 # Optimization
-learning_rate: 5.0e-4
+learning_rate: 5.0e-5
 weight_decay: 0.01
-warmup_steps: 100
+warmup_steps: 500
 max_grad_norm: 1.0
 
 # Batching
