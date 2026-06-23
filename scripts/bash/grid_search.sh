@@ -48,7 +48,7 @@ echo "Run directory: $RUN_DIR"
 # -------------------------
 echo "Starting training..."
 
-python train.py \
+python /lustre/fswork/projects/rech/ywa/uds37kc/GTH/scripts/train/train.py \
   --config "$CONFIG" \
   --dataset-name english_data \
   --model-name gpt2 \
@@ -75,10 +75,9 @@ echo "Using checkpoint: $CKPT"
 # -------------------------
 echo "Starting evaluation..."
 
-python eval.py \
+python /lustre/fswork/projects/rech/ywa/uds37kc/GTH/scripts/eval/eval_nested.py \
   --ckpt "$CKPT" \
-  --eval-dataset scripts/eval/eval_data/short_nested_inner.json \
-  --out-csv "$RUN_DIR/eval.csv" \
+  --eval-dataset /lustre/fswork/projects/rech/ywa/uds37kc/GTH/scripts/eval/eval_data/short_nested_inner.json \
   --out-metrics "$RUN_DIR/eval_metrics.json"
 
 echo "Done."
