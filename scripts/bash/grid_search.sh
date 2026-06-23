@@ -52,7 +52,7 @@ python scripts/train/train.py \
   --config "$CONFIG" \
   --dataset-name baseline \
   --model-name gpt2 \
-  --cache-dir scripts/train./cache \
+  --cache-dir scripts/train/.cache \
   --output-dir "$RUN_DIR"
 
 echo "Training done."
