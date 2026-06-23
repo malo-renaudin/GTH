@@ -1,69 +1,92 @@
+from datasets import load_dataset, load_from_disk
+from transformers import (
+    AutoTokenizer,
+    AutoConfig,
+    AutoModelForCausalLM,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+    EarlyStoppingCallback
+)
+from itertools import chain
+import argparse
 import yaml
-import lightning as L
-import torch
+import os
+import json
 
-from models import LSTMLM, build_mamba
-from LitLM import LitLM,LitDataModule
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+argument_parser = argparse.ArgumentParser()
+argument_parser.add_argument("--dataset-name", type=str, default="english_data")
+argument_parser.add_argument("--model-name", type=str, default="gpt2")
+argument_parser.add_argument("--config", type=str, default="gpt2")
+argument_parser.add_argument("--cache-dir", type=str, default="./cache")
+args = argument_parser.parse_args()
 
-cfg = yaml.safe_load(open("config.yaml"))
+config = yaml.safe_load(open(args.config))
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-dtype = torch.bfloat16 if device == "cuda" else torch.float32
+hf_config = AutoConfig.from_pretrained(args.model_name, 
+                                       cache_dir= args.cache_dir, 
+                                       local_files_only=True,
+                                       attn_implementation="sdpa")
+model = AutoModelForCausalLM.from_config(hf_config)
 
+model.gradient_checkpointing_enable()
+model.config.use_cache = False
 
-# --------------------
-# model selection
-# --------------------
-if cfg["model"] == "lstm":
-    base_model = LSTMLM(
-        cfg["vocab_size"],
-        cfg["d_model"],
-        cfg["n_layers"]
-    )
-
-elif cfg["model"] == "mamba":
-    base_model = build_mamba(cfg, device, dtype)
-
-else:
-    raise ValueError("unknown model")
+tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
+tokenizer.pad_token = tokenizer.eos_token
 
 
-# --------------------
-# Lightning wrapper
-# --------------------
-model = LitLM(base_model, scheduler = cfg["scheduler"], lr=cfg["lr"], weight_decay=cfg["weight_decay"])
 
-# --------------------
-# data
-# --------------------
-data = LitDataModule(cfg["train_data_path"], cfg["val_data_path"], cfg["batch_size"])
+lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}_packed")
 
-early_stopping = EarlyStopping(
-    monitor="val_loss",
-    mode="min",
-    patience=5,
+training_args = TrainingArguments(
+    output_dir=config.get("output_dir", "gpt2-out"),
+    per_device_train_batch_size=config.get("train_batch_size", 4),
+    do_eval = True,
+    do_train = True,
+    eval_strategy="steps",   
+    # evaluate_during_training=True,
+    save_strategy="steps",
+    eval_steps=config.get("eval_steps", 500),
+    save_steps=config.get("save_steps", 500),
+    learning_rate=config.get("learning_rate", 5e-5),#grid
+    num_train_epochs=config.get("num_train_epochs", 3),
+    weight_decay=config.get("weight_decay", 0.01),#grid
+    logging_steps=config.get("logging_steps", 50),
+    max_grad_norm=config.get("max_grad_norm", 1),
+    dataloader_num_workers=4,
+    dataloader_prefetch_factor=2,
+    dataloader_pin_memory=True,
+    remove_unused_columns=False,
+    gradient_accumulation_steps = 2,
+    bf16=True, 
+    optim="adamw_torch_fused",
+    load_best_model_at_end=True,   # IMPORTANT
+    metric_for_best_model="eval_loss",
+    greater_is_better=False,
+    warmup_ratio=config.get("warmup_ratio", 0.1),
 )
 
-
-checkpoint = ModelCheckpoint(
-    monitor="val_loss",
-    mode="min",
-    save_top_k=1,
-)
-# --------------------
-# trainer
-# --------------------
-trainer = L.Trainer(
-    gradient_clip_val=cfg["max_norm"],
-    gradient_clip_algorithm="norm",
-    val_check_interval=cfg["val_check_interval"],
-    max_steps=cfg["max_steps"],
-    precision="bf16-mixed",
-    accelerator="gpu",
-    devices="auto",
-    log_every_n_steps=50,
-    callbacks=[early_stopping, checkpoint],
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=lm_datasets["train"],
+    eval_dataset=lm_datasets["validation"],
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
+    data_collator = None,
 )
 
-trainer.fit(model, data)
+trainer.train()
+
+log_history = trainer.state.log_history
+
+train_losses = [x["loss"] for x in log_history if "loss" in x and "eval_loss" not in x]
+eval_losses = [x["eval_loss"] for x in log_history if "eval_loss" in x]
+
+metrics = {
+    "train_loss": train_losses[-1] if train_losses else None,
+    "val_loss": eval_losses[-1] if eval_losses else None,
+}
+
+with open(os.path.join(training_args.output_dir, "train_metrics.json"), "w") as f:
+    json.dump(metrics, f)
