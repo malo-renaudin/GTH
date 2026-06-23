@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --account=ywa@h100
 #SBATCH --partition=gpu_p6
-#SBATCH --qos=qos_gpu_h100-dev
+#SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --constraint=h100
 #SBATCH --job-name=grid-pretrain
 #SBATCH --array=0-54
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=2:00:00
+#SBATCH --time=3:00:00
 #SBATCH --output=logs/grid_%A_%a.out
 #SBATCH --error=logs/grid_%A_%a.err
 
