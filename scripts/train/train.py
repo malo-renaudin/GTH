@@ -19,6 +19,7 @@ argument_parser.add_argument("--dataset-name", type=str, default="english_data")
 argument_parser.add_argument("--model-name", type=str, default="gpt2")
 argument_parser.add_argument("--config", type=str, default="gpt2")
 argument_parser.add_argument("--cache-dir", type=str, default="./cache")
+argument_parser.add_argument("--output-dir", type=str)
 args = argument_parser.parse_args()
 
 config = yaml.safe_load(open(args.config))
@@ -40,7 +41,7 @@ tokenizer.pad_token = tokenizer.eos_token
 lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}_packed")
 
 training_args = TrainingArguments(
-    output_dir=config.get("output_dir", "gpt2-out"),
+    output_dir=args.output_dir,
     per_device_train_batch_size=config.get("train_batch_size", 4),
     do_eval = True,
     do_train = True,
