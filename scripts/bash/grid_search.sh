@@ -50,9 +50,9 @@ echo "Starting training..."
 
 python /lustre/fswork/projects/rech/ywa/uds37kc/GTH/scripts/train/train.py \
   --config "$CONFIG" \
-  --dataset-name english_data \
+  --dataset-name baseline \
   --model-name gpt2 \
-  --cache-dir ./cache \
+  --cache-dir /lustre/fswork/projects/rech/ywa/uds37kc/GTH/scripts/train./cache \
   --output-dir "$RUN_DIR"
 
 echo "Training done."
