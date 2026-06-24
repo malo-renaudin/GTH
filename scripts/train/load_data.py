@@ -28,7 +28,20 @@ tokenizer = AutoTokenizer.from_pretrained("gpt2", cache_dir=args.cache_dir, loca
 tokenizer.pad_token = tokenizer.eos_token
 
 def tokenize(batch):
-    return tokenizer(batch["text"])
+    texts = []
+    for t in batch["text"]:
+        t = t.strip()
+
+        # Normalize any existing EOS-like markers
+        t = t.replace("<|endoftext|>", tokenizer.eos_token)
+
+        # Ensure exactly one EOS at end
+        if not t.endswith(tokenizer.eos_token):
+            t = t + tokenizer.eos_token
+
+        texts.append(t)
+
+    return tokenizer(texts, add_special_tokens=False)
 
 tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
