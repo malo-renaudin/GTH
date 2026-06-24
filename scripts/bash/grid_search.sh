@@ -50,7 +50,7 @@ echo "Starting training..."
 
 python scripts/train/train.py \
   --config "$CONFIG" \
-  --dataset-name baseline \
+  --dataset-name baseline_eos_unk \
   --model-name gpt2 \
   --cache-dir scripts/train/.cache \
   --output-dir "$RUN_DIR"
