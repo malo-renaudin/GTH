@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-RESULTS_DIR = Path("results")
+RESULTS_DIR = Path("results/grid_search")
 
 rows = []
 
