@@ -40,7 +40,7 @@ tokenizer.pad_token = tokenizer.eos_token
 
 model.resize_token_embeddings(len(tokenizer))
 
-lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}_packed")
+lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}")
 
 training_args = TrainingArguments(
     output_dir=args.output_dir,
