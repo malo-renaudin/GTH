@@ -37,7 +37,6 @@ block_size = 1024  # or 1024 on H100
 
 def group_texts(examples):
     concatenated = {}
-
     for k in examples.keys():
         concatenated[k] = sum(examples[k], [])
 
@@ -49,19 +48,11 @@ def group_texts(examples):
         for i in range(0, total_length, block_size)
     ]
 
-    attention_mask = [
-        [1] * block_size
-        for _ in range(len(input_ids))
-    ]
-
-    labels = [
-        x.copy() for x in input_ids
-    ]
+    attention_mask = [[1] * block_size for _ in input_ids]
 
     return {
         "input_ids": input_ids,
         "attention_mask": attention_mask,
-        "labels": labels,   # ← THIS FIXES YOUR ERROR
     }
 
 

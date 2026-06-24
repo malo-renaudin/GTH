@@ -14,6 +14,7 @@ import yaml
 import os
 import json
 
+
 argument_parser = argparse.ArgumentParser()
 argument_parser.add_argument("--dataset-name", type=str, default="english_data")
 argument_parser.add_argument("--model-name", type=str, default="gpt2")
@@ -68,13 +69,19 @@ training_args = TrainingArguments(
     warmup_ratio=config.get("warmup_ratio", 0.1),
 )
 
+
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False
+)
+
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=lm_datasets["train"],
     eval_dataset=lm_datasets["validation"],
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
-    data_collator = None,
+    data_collator = data_collator,
 )
 
 trainer.train()
