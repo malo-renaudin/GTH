@@ -26,12 +26,18 @@ dataset = load_dataset("text", data_files={
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2", cache_dir=args.cache_dir, local_files_only=True)
 tokenizer.pad_token = tokenizer.eos_token
+tokenizer.add_special_tokens({
+    "additional_special_tokens": ["[MISSING]"]
+})
+
+MISSING_ID = tokenizer.convert_tokens_to_ids("[MISSING]")
+assert MISSING_ID != tokenizer.eos_token_id
 
 def tokenize(batch):
     texts = []
     for t in batch["text"]:
         t = t.strip()
-
+        t = t.replace("<unk>", "[MISSING]")
         # Normalize any existing EOS-like markers
         t = t.replace("<|endoftext|>", tokenizer.eos_token)
 
@@ -63,11 +69,18 @@ def group_texts(examples):
 
     attention_mask = [[1] * block_size for _ in input_ids]
 
+    labels = []
+    for seq in input_ids:
+        labels.append([
+            token if token != MISSING_ID else -100
+            for token in seq
+        ])
+
     return {
         "input_ids": input_ids,
         "attention_mask": attention_mask,
+        "labels": labels
     }
-
 
 packed = tokenized.map(
     group_texts,
@@ -78,3 +91,4 @@ packed = tokenized.map(
 # SAVE PACKED DATASET
 # =========================
 packed.save_to_disk(args.cache_dir + f"/{args.dataset_name}_packed")
+tokenizer.save_pretrained(args.cache_dir + "/tokenizer")

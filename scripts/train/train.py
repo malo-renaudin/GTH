@@ -34,10 +34,11 @@ model = AutoModelForCausalLM.from_config(hf_config)
 model.gradient_checkpointing_enable()
 model.config.use_cache = False
 
-tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
+# tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir= args.cache_dir, local_files_only=True)
+tokenizer = AutoTokenizer.from_pretrained(args.cache_dir + "/tokenizer", local_files_only=True)
 tokenizer.pad_token = tokenizer.eos_token
 
-
+model.resize_token_embeddings(len(tokenizer))
 
 lm_datasets = load_from_disk(args.cache_dir + f"/{args.dataset_name}_packed")
 
