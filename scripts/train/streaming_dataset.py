@@ -59,10 +59,10 @@ c4_val = IterableDataset.from_generator(
     lambda: sentence_generator(c4_val_ds)
 )
 
-orc_ds = load_dataset("text", data_files="data/orc.txt", split="train", streaming=True)
-wh_ds = load_dataset("text", data_files="data/wh.txt", split="train", streaming=True)
-svo_wh_ds = load_dataset("text", data_files="data/svo_from_wh.txt", split="train", streaming=True)
-svo_orc_ds = load_dataset("text", data_files="data/svo_from_orc.txt", split="train", streaming=True)
+orc_ds = load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)
+wh_ds = load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)
+svo_wh_ds = load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)
+svo_orc_ds = load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)
 
 mixed_stream = interleave_datasets(
     [
