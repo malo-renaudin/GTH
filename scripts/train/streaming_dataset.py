@@ -111,12 +111,13 @@ train_dataset = PackedStreamingDataset(
     tokenizer,
     block_size=1024
 )
+c4_val_truncated = c4_val.take(10000)
+
 validation_dataset = PackedStreamingDataset(
-    c4_val,
+    c4_val_truncated,
     tokenizer,
     block_size=1024
 )
-validation_dataset = validation_dataset.take(10000)
 
 config = yaml.safe_load(open(args.config))
 
