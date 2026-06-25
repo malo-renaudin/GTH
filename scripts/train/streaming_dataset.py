@@ -80,7 +80,13 @@ class PackedStreamingDataset(IterableDataset):
         self.stream = stream
         self.tokenizer = tokenizer
         self.block_size = block_size
-
+        self._epoch = 0
+    def set_epoch(self, epoch):
+        # 2. Add the method Hugging Face calls at the start of each epoch
+        self._epoch = epoch
+        if hasattr(self.stream, "set_epoch"):
+            self.stream.set_epoch(epoch)
+            
     def __iter__(self):
         buffer = []
 
