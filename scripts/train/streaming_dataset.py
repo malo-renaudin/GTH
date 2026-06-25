@@ -15,16 +15,15 @@ import argparse
 import yaml
 
 argument_parser = argparse.ArgumentParser()
-argument_parser.add_argument("--dataset-name", type=str, default="english_data")
 argument_parser.add_argument("--model-name", type=str, default="gpt2")
-argument_parser.add_argument("--config", type=str, default="gpt2")
-argument_parser.add_argument("--cache-dir", type=str, default="./cache")
+argument_parser.add_argument("--config", type=str, default="confgis/hf/gpt2")
+argument_parser.add_argument("--cache-dir", type=str, default="scripts/train/.cache")
 argument_parser.add_argument("--output-dir", type=str)
 argument_parser.add_argument("--c4", type=float, default=0.9)
-argument_parser.add_argument("--orc", type=float, default=0.025)
-argument_parser.add_argument("--wh", type=float, default=0.025)
-argument_parser.add_argument("--svo_wh", type=float, default=0.025)
-argument_parser.add_argument("--svo_orc", type=float, default=0.025)
+argument_parser.add_argument("--orc", type=float, default=0)
+argument_parser.add_argument("--wh", type=float, default=0)
+argument_parser.add_argument("--svo_wh", type=float, default=0.05)
+argument_parser.add_argument("--svo_orc", type=float, default=0.05)
 args = argument_parser.parse_args()
 
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train/*"
