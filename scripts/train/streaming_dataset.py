@@ -80,13 +80,13 @@ mixed_stream = interleave_datasets(
     seed=42
 )
 
-tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True)
+tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
 
 
 
 class PackedStreamingDataset(IterableDataset):
-    def __init__(self, stream, tokenizer: PreTrainedTokenizer, block_size=1024, batch_text_size=128):
+    def __init__(self, stream, tokenizer: PreTrainedTokenizer, block_size=1024, batch_text_size=512):
         self.stream = stream
         self.tokenizer = tokenizer
         self.block_size = block_size
@@ -173,7 +173,7 @@ training_args = TrainingArguments(
     save_steps=config.get("save_steps", 500),
     learning_rate=config.get("learning_rate", 5e-5),#grid
     # num_train_epochs=config.get("num_train_epochs", 3),
-    max_steps=1000000,
+    max_steps=500000,
     weight_decay=config.get("weight_decay", 0.01),#grid
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
