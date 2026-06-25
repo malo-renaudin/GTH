@@ -8,7 +8,7 @@ warmup_ratio: 0.1
 max_grad_norm: 1.0
 
 # Batching
-train_batch_size: 64
+train_batch_size: 32
 
 # Training duration
 num_train_epochs: 10
