@@ -26,8 +26,8 @@ argument_parser.add_argument("--svo_wh", type=float, default=0.05)
 argument_parser.add_argument("--svo_orc", type=float, default=0.05)
 args = argument_parser.parse_args()
 
-c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train/*"
-c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation/*"
+c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
+c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
 c4_ds = load_from_disk(c4_train_path).to_iterable_dataset()
 c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset()
