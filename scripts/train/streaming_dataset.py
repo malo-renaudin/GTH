@@ -1,5 +1,5 @@
 import random
-from datasets import load_dataset, interleave_datasets, IterableDataset
+from datasets import load_dataset, interleave_datasets, IterableDataset, load_from_disk
 from transformers import (
     AutoTokenizer,
     AutoConfig,
@@ -29,18 +29,8 @@ args = argument_parser.parse_args()
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train/*"
 c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation/*"
 
-c4_ds = load_dataset(
-    "json",
-    data_files=c4_train_path,
-    split="train",
-    streaming=True
-)
-c4_val_ds = load_dataset(
-    "json",
-    data_files=c4_val_path,
-    split="validation",
-    streaming=True
-)
+c4_ds = load_from_disk(c4_train_path).to_iterable_dataset()
+c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset()
 
 
 def sentence_generator(dataset):
