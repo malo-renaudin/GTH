@@ -7,12 +7,16 @@ from transformers import (
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
-    EarlyStoppingCallback
+    EarlyStoppingCallback,
+    PreTrainedTokenizer
 )
 import nltk
 from nltk.tokenize import sent_tokenize
 import argparse
 import yaml
+import re
+import torch
+
 
 argument_parser = argparse.ArgumentParser()
 argument_parser.add_argument("--model-name", type=str, default="gpt2")
@@ -32,11 +36,15 @@ c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 c4_ds = load_from_disk(c4_train_path).to_iterable_dataset()
 c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset()
 
+_sentence_splitter = re.compile(r"(?<=[.!?])\s+")
 
 def sentence_generator(dataset):
     for example in dataset:
         text = example["text"]
-        for sent in sent_tokenize(text):
+
+        sentences = _sentence_splitter.split(text)
+
+        for sent in sentences:
             sent = sent.strip()
             if sent:
                 yield {"text": sent}
@@ -75,43 +83,59 @@ mixed_stream = interleave_datasets(
 tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True)
 tokenizer.pad_token = tokenizer.eos_token
 
+
+
 class PackedStreamingDataset(IterableDataset):
-    def __init__(self, stream, tokenizer, block_size=1024):
+    def __init__(self, stream, tokenizer: PreTrainedTokenizer, block_size=1024, batch_text_size=128):
         self.stream = stream
         self.tokenizer = tokenizer
         self.block_size = block_size
+        self.batch_text_size = batch_text_size
         self._epoch = 0
+
     def set_epoch(self, epoch):
-        # 2. Add the method Hugging Face calls at the start of each epoch
         self._epoch = epoch
         if hasattr(self.stream, "set_epoch"):
             self.stream.set_epoch(epoch)
-            
+
     def __iter__(self):
-        buffer = []
+        buffer = torch.empty((0,), dtype=torch.long)
+        text_buffer = []
+
+        eos = self.tokenizer.eos_token_id
 
         for example in self.stream:
-            text = example["text"].strip()
+            text_buffer.append(example["text"].strip())
 
-            # light cleanup (optional)
-            # text = text.replace("<unk>", "")
+            # ---- batch tokenize ----
+            if len(text_buffer) >= self.batch_text_size:
 
-            tokens = self.tokenizer(
-                            text + self.tokenizer.eos_token,
-                            add_special_tokens=False
-                        )["input_ids"]
-            buffer.extend(tokens)
+                enc = self.tokenizer(
+                    [t + self.tokenizer.eos_token for t in text_buffer],
+                    add_special_tokens=False
+                )["input_ids"]
 
-            while len(buffer) >= self.block_size:
+                # flatten WITHOUT Python loop over tokens
+                flat = torch.tensor(
+                    sum(enc, []),  # still Python flatten once (minimal unavoidable step)
+                    dtype=torch.long
+                )
+
+                buffer = torch.cat([buffer, flat])
+
+                text_buffer = []
+
+            # ---- tensor-based packing ----
+            while buffer.size(0) >= self.block_size:
+
                 chunk = buffer[:self.block_size]
                 buffer = buffer[self.block_size:]
 
                 yield {
                     "input_ids": chunk,
-                    "labels": chunk.copy(),
-                    "attention_mask": [1] * self.block_size
+                    "labels": chunk.clone(),
+                    "attention_mask": torch.ones_like(chunk)
                 }
-
 train_dataset = PackedStreamingDataset(
     mixed_stream,
     tokenizer,
@@ -133,7 +157,7 @@ hf_config = AutoConfig.from_pretrained(args.model_name,
                                        attn_implementation="sdpa")
 model = AutoModelForCausalLM.from_config(hf_config)
 
-model.gradient_checkpointing_enable()
+# model.gradient_checkpointing_enable()
 model.config.use_cache = False
 
 training_args = TrainingArguments(
@@ -157,7 +181,7 @@ training_args = TrainingArguments(
     # dataloader_prefetch_factor=2,
     dataloader_pin_memory=True,
     remove_unused_columns=False,
-    gradient_accumulation_steps = 2,
+    # gradient_accumulation_steps = 1,
     bf16=True, 
     optim="adamw_torch_fused",
     load_best_model_at_end=True,   # IMPORTANT
