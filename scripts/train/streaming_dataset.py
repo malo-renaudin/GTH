@@ -16,7 +16,7 @@ import yaml
 
 argument_parser = argparse.ArgumentParser()
 argument_parser.add_argument("--model-name", type=str, default="gpt2")
-argument_parser.add_argument("--config", type=str, default="configs/hf/gpt2")
+argument_parser.add_argument("--config", type=str, default="configs/hf/gpt2.yaml")
 argument_parser.add_argument("--cache-dir", type=str, default="scripts/train/.cache")
 argument_parser.add_argument("--output-dir", type=str)
 argument_parser.add_argument("--c4", type=float, default=0.9)
