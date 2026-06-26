@@ -37,24 +37,39 @@ c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset()
 
 _sentence_splitter = re.compile(r"(?<=[.!?])\s+")
 
-def sentence_generator(dataset):
-    for example in dataset:
+def sentence_generator(dataset, worker_id=0, num_workers=1):
+    for i, example in enumerate(dataset):
+        # Only process items that belong to this worker shard
+        if i % num_workers != worker_id:
+            continue
+            
         text = example["text"]
-
         sentences = _sentence_splitter.split(text)
-
         for sent in sentences:
             sent = sent.strip()
             if sent:
                 yield {"text": sent}
 
+# Create a wrapper function that checks PyTorch worker info dynamically at iteration time
+def packaged_generator_wrapper(base_ds):
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is None:
+        worker_id = 0
+        num_workers = 1
+    else:
+        worker_id = worker_info.id
+        num_workers = worker_info.num_workers
+        
+    return sentence_generator(base_ds, worker_id=worker_id, num_workers=num_workers)
+
+# Instantiate using the wrapper
 c4_sent = IterableDataset.from_generator(
-    lambda: sentence_generator(c4_ds),
+    lambda: packaged_generator_wrapper(c4_ds),
     features=getattr(c4_ds, "features", None)
 )
 
 c4_val = IterableDataset.from_generator(
-    lambda: sentence_generator(c4_val_ds),
+    lambda: packaged_generator_wrapper(c4_val_ds),
     features=getattr(c4_val_ds, "features", None)
 )
 
@@ -104,8 +119,13 @@ class PackedStreamingDataset(IterableDataset):
         shard_idx = worker_info.id
         sharded = []
         for ds in srcs:
-            sh = ds.shard(num_shards=num_shards, index=shard_idx)
-            sharded.append(sh)
+            if hasattr(ds, "_ex_iterable") and type(ds._ex_iterable).__name__ == "GeneratorIterable":
+                # The generator wrapper handles worker assignment inside itself
+                sharded.append(ds)
+            else:
+                # Safely shard standard streaming datasets (e.g., text/json files)
+                sh = ds.shard(num_shards=num_shards, index=shard_idx)
+                sharded.append(sh)
         stream = interleave_datasets(sharded, probabilities=probs, seed=42)
     
         buffer = torch.empty((0,), dtype=torch.long)
