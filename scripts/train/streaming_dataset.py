@@ -56,16 +56,37 @@ def get_worker_sharded_generator(base_ds):
         return sentence_generator(base_ds, worker_id=0, num_workers=1)
     return sentence_generator(base_ds, worker_id=worker_info.id, num_workers=worker_info.num_workers)
 
-# Re-define your datasets using the dynamic wrapper
-c4_sent = IterableDataset.from_generator(lambda: get_worker_sharded_generator(c4_ds), features=getattr(c4_ds, "features", None))
-c4_val = IterableDataset.from_generator(lambda: get_worker_sharded_generator(c4_val_ds), features=getattr(c4_val_ds, "features", None))
+# Re-define your datasets so each worker (and HF probes) get a fresh iterator
+# For C4 (Arrow), capture features once and recreate the iterable per call.
+c4_features = getattr(c4_ds, "features", None)
+c4_sent = IterableDataset.from_generator(
+    lambda: sentence_generator(load_from_disk(c4_train_path).to_iterable_dataset()),
+    features=c4_features,
+)
+c4_val = IterableDataset.from_generator(
+    lambda: sentence_generator(load_from_disk(c4_val_path).to_iterable_dataset()),
+    features=c4_features,
+)
 c4_sent.is_generator_sharded = True
 c4_val.is_generator_sharded = True
 
-orc_ds = load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)
-wh_ds = load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)
-svo_wh_ds = load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)
-svo_orc_ds = load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)
+# Wrap text-file streaming sources so each call creates a fresh streaming dataset
+orc_ds = IterableDataset.from_generator(
+    lambda: iter(load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)),
+    features=None,
+)
+wh_ds = IterableDataset.from_generator(
+    lambda: iter(load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)),
+    features=None,
+)
+svo_wh_ds = IterableDataset.from_generator(
+    lambda: iter(load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)),
+    features=None,
+)
+svo_orc_ds = IterableDataset.from_generator(
+    lambda: iter(load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)),
+    features=None,
+)
 
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True, use_fast=True)
@@ -132,7 +153,33 @@ class PackedStreamingDataset(IterableDataset):
                     features=getattr(ds, "features", None)
                 )
             sharded.append(sh)
-        stream = interleave_datasets(sharded, probabilities=probs, seed=42)
+        # Prefer HF interleaving; if it fails (e.g., empty shards cause
+        # feature inference to stop), fall back to a safe round-robin
+        # iterable built from the sharded iterators.
+        try:
+            stream = interleave_datasets(sharded, probabilities=probs, seed=42 + self._epoch)
+        except Exception:
+            def _round_robin(sharded_list):
+                iters = [iter(s) for s in sharded_list]
+                alive = [True] * len(iters)
+                while any(alive):
+                    for i, it in enumerate(iters):
+                        if not alive[i]:
+                            continue
+                        try:
+                            yield next(it)
+                        except StopIteration:
+                            alive[i] = False
+                            continue
+
+            # attempt to reuse features from first available source
+            features = None
+            for s in sharded:
+                features = getattr(s, "features", None)
+                if features is not None:
+                    break
+
+            stream = IterableDataset.from_generator(lambda: _round_robin(sharded), features=features)
     
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
