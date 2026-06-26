@@ -11,7 +11,6 @@ from transformers import (
     PreTrainedTokenizer
 )
 import nltk
-from nltk.tokenize import sent_tokenize
 import argparse
 import yaml
 import re
@@ -99,12 +98,32 @@ class PackedStreamingDataset(IterableDataset):
             self.stream.set_epoch(epoch)
 
     def __iter__(self):
+        # handle worker-level sharding to avoid duplicate examples when
+        # using multiple dataloader workers
+        worker_info = torch.utils.data.get_worker_info()
+
+        stream = self.stream
+        if worker_info is not None:
+            num_shards = worker_info.num_workers
+            shard_idx = worker_info.id
+            if hasattr(stream, "shard"):
+                try:
+                    stream = stream.shard(num_shards=num_shards, index=shard_idx)
+                except TypeError:
+                    stream = stream.shard(num_shards, shard_idx)
+            else:
+                def _shard_gen(orig_stream, n_shards, idx):
+                    for i, item in enumerate(orig_stream):
+                        if (i % n_shards) == idx:
+                            yield item
+                stream = IterableDataset.from_generator(lambda: _shard_gen(iter(self.stream), num_shards, shard_idx))
+
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
 
         eos = self.tokenizer.eos_token_id
 
-        for example in self.stream:
+        for example in stream:
             text_buffer.append(example["text"].strip())
 
             # ---- batch tokenize ----
@@ -115,11 +134,8 @@ class PackedStreamingDataset(IterableDataset):
                     add_special_tokens=False
                 )["input_ids"]
 
-                # flatten WITHOUT Python loop over tokens
-                flat = torch.tensor(
-                    sum(enc, []),  # still Python flatten once (minimal unavoidable step)
-                    dtype=torch.long
-                )
+                # convert each list of ids to a tensor and concatenate efficiently
+                flat = torch.cat([torch.tensor(x, dtype=torch.long) for x in enc]) if len(enc) > 0 else torch.empty((0,), dtype=torch.long)
 
                 buffer = torch.cat([buffer, flat])
 
@@ -177,8 +193,8 @@ training_args = TrainingArguments(
     weight_decay=config.get("weight_decay", 0.01),#grid
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
-    # dataloader_num_workers=4,
-    # dataloader_prefetch_factor=2,
+    dataloader_num_workers=config.get("dataloader_num_workers", 4),
+    dataloader_prefetch_factor=config.get("dataloader_prefetch_factor", 2),
     dataloader_pin_memory=True,
     remove_unused_columns=False,
     # gradient_accumulation_steps = 1,
