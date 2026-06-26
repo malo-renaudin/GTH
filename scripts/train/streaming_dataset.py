@@ -99,31 +99,30 @@ class PackedStreamingDataset(IterableDataset):
 
     def __iter__(self):
         # handle worker-level sharding to avoid duplicate examples when
-        # using multiple dataloader workers
+        # using multiple dataloader workers. Some Hugging Face iterable
+        # datasets (especially interleaved ones) can raise when calling
+        # `shard()` after being serialized to worker processes; to avoid
+        # that we perform a simple index-based sharding here.
         worker_info = torch.utils.data.get_worker_info()
-
-        stream = self.stream
         if worker_info is not None:
             num_shards = worker_info.num_workers
             shard_idx = worker_info.id
-            if hasattr(stream, "shard"):
-                try:
-                    stream = stream.shard(num_shards=num_shards, index=shard_idx)
-                except TypeError:
-                    stream = stream.shard(num_shards, shard_idx)
-            else:
-                def _shard_gen(orig_stream, n_shards, idx):
-                    for i, item in enumerate(orig_stream):
-                        if (i % n_shards) == idx:
-                            yield item
-                stream = IterableDataset.from_generator(lambda: _shard_gen(iter(self.stream), num_shards, shard_idx))
+        else:
+            num_shards = 1
+            shard_idx = 0
 
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
 
         eos = self.tokenizer.eos_token_id
 
-        for example in stream:
+        # iterate over the underlying stream and keep only the items that
+        # belong to this worker (round-robin partitioning)
+        stream_iter = iter(self.stream)
+        for i, example in enumerate(stream_iter):
+            if (i % num_shards) != shard_idx:
+                continue
+
             text_buffer.append(example["text"].strip())
 
             # ---- batch tokenize ----
