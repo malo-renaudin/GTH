@@ -111,10 +111,27 @@ class PackedStreamingDataset(IterableDataset):
             if hasattr(ds, "_ex_iterable") and type(ds._ex_iterable).__name__ == "GeneratorIterable":
                 # The generator wrapper handles worker assignment inside itself
                 sharded.append(ds)
-            else:
-                # Safely shard standard streaming datasets (e.g., text/json files)
+                continue
+
+            # Try HF sharding first; if it fails (some streaming sources
+            # cannot be sharded after serialization), fall back to a
+            # per-worker generator wrapper that yields the round-robin
+            # slice for this worker.
+            try:
                 sh = ds.shard(num_shards=num_shards, index=shard_idx)
-                sharded.append(sh)
+            except Exception:
+                def _make_worker_slice(orig_ds, idx, n):
+                    def _gen():
+                        for i, item in enumerate(orig_ds):
+                            if (i % n) == idx:
+                                yield item
+                    return _gen
+
+                sh = IterableDataset.from_generator(
+                    _make_worker_slice(ds, shard_idx, num_shards),
+                    features=getattr(ds, "features", None)
+                )
+            sharded.append(sh)
         stream = interleave_datasets(sharded, probabilities=probs, seed=42)
     
         buffer = torch.empty((0,), dtype=torch.long)
