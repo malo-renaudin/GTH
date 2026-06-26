@@ -63,23 +63,6 @@ wh_ds = load_dataset("text", data_files="data/wh5.txt", split="train", streaming
 svo_wh_ds = load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)
 svo_orc_ds = load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)
 
-mixed_stream = interleave_datasets(
-    [
-        c4_sent,
-        orc_ds,
-        wh_ds,
-        svo_wh_ds,
-        svo_orc_ds
-    ],
-    probabilities=[
-        args.c4,  # C4 backbone
-        args.orc, # ORC
-        args.wh, # WH
-        args.svo_wh, # SVO-from-WH
-        args.svo_orc  # SVO-from-ORC
-    ],
-    seed=42
-)
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
@@ -87,8 +70,12 @@ tokenizer.pad_token = tokenizer.eos_token
 
 
 class PackedStreamingDataset(IterableDataset):
-    def __init__(self, stream, tokenizer: PreTrainedTokenizer, block_size=1024, batch_text_size=512):
+    def __init__(self, stream=None, tokenizer: PreTrainedTokenizer=None, block_size=1024, batch_text_size=512, sources=None, probabilities=None):
+        # If `sources` is provided, we will shard each source per-worker
+        # and then call `interleave_datasets` on the per-source shards.
         self.stream = stream
+        self.sources = sources
+        self.probabilities = probabilities
         self.tokenizer = tokenizer
         self.block_size = block_size
         self.batch_text_size = batch_text_size
@@ -100,25 +87,27 @@ class PackedStreamingDataset(IterableDataset):
             self.stream.set_epoch(epoch)
 
     def __iter__(self):
-        # Use Hugging Face `shard()` to split the iterable dataset per
-        # dataloader worker. This requires the underlying stream to
-        # support `.shard()` (e.g., HF IterableDatasets with `features`).
         worker_info = torch.utils.data.get_worker_info()
-        stream = self.stream
-        if worker_info is not None:
-            num_shards = worker_info.num_workers
-            shard_idx = worker_info.id
-            if not hasattr(stream, "shard"):
-                raise RuntimeError(
-                    "Iterable dataset does not support Hugging Face `shard()`; "
-                    "cannot use multiple dataloader workers. Set `dataloader_num_workers=1` or convert sources to HF IterableDatasets with `features`."
-                )
-            try:
-                stream = stream.shard(num_shards=num_shards, index=shard_idx)
-            except TypeError:
-                # fallback to positional args for older datasets versions
-                stream = stream.shard(num_shards, shard_idx)
 
+        # Build the stream: either from per-source sharded interleaving
+        # (preferred when `sources` is provided) or from the single
+        # `self.stream` (fallback).
+        stream = None
+
+        # filter out zero-probability sources
+        filtered = [(s, p) for s, p in zip(self.sources, self.probabilities or []) if p and p > 0]
+        srcs = [s for s, _ in filtered]
+        probs = [p for _, p in filtered]
+
+        #shard dataset across workers and build an interleaved dataset per worker
+        num_shards = worker_info.num_workers
+        shard_idx = worker_info.id
+        sharded = []
+        for ds in srcs:
+            sh = ds.shard(num_shards=num_shards, index=shard_idx)
+            sharded.append(sh)
+        stream = interleave_datasets(sharded, probabilities=probs, seed=42)
+    
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
 
@@ -154,9 +143,23 @@ class PackedStreamingDataset(IterableDataset):
                     "attention_mask": torch.ones_like(chunk)
                 }
 train_dataset = PackedStreamingDataset(
-    mixed_stream,
-    tokenizer,
-    block_size=1024
+    stream=None,
+    tokenizer=tokenizer,
+    block_size=1024,
+    sources=[
+        c4_sent,
+        orc_ds,
+        wh_ds,
+        svo_wh_ds,
+        svo_orc_ds
+    ],
+    probabilities=[
+        args.c4,
+        args.orc,
+        args.wh,
+        args.svo_wh,
+        args.svo_orc
+    ]
 )
 c4_val_truncated = c4_val.take(10000)
 
