@@ -39,10 +39,9 @@ _sentence_splitter = re.compile(r"(?<=[.!?])\s+")
 
 def sentence_generator(dataset, worker_id=0, num_workers=1):
     for i, example in enumerate(dataset):
-        # Only process items that belong to this worker shard
+        # Let each worker grab its own slice cleanly at the source
         if i % num_workers != worker_id:
             continue
-            
         text = example["text"]
         sentences = _sentence_splitter.split(text)
         for sent in sentences:
@@ -50,28 +49,18 @@ def sentence_generator(dataset, worker_id=0, num_workers=1):
             if sent:
                 yield {"text": sent}
 
-# Create a wrapper function that checks PyTorch worker info dynamically at iteration time
-def packaged_generator_wrapper(base_ds):
+# A small helper function that checks PyTorch's current worker on-the-fly
+def get_worker_sharded_generator(base_ds):
     worker_info = torch.utils.data.get_worker_info()
     if worker_info is None:
-        worker_id = 0
-        num_workers = 1
-    else:
-        worker_id = worker_info.id
-        num_workers = worker_info.num_workers
-        
-    return sentence_generator(base_ds, worker_id=worker_id, num_workers=num_workers)
+        return sentence_generator(base_ds, worker_id=0, num_workers=1)
+    return sentence_generator(base_ds, worker_id=worker_info.id, num_workers=worker_info.num_workers)
 
-# Instantiate using the wrapper
-c4_sent = IterableDataset.from_generator(
-    lambda: packaged_generator_wrapper(c4_ds),
-    features=getattr(c4_ds, "features", None)
-)
-
-c4_val = IterableDataset.from_generator(
-    lambda: packaged_generator_wrapper(c4_val_ds),
-    features=getattr(c4_val_ds, "features", None)
-)
+# Re-define your datasets using the dynamic wrapper
+c4_sent = IterableDataset.from_generator(lambda: get_worker_sharded_generator(c4_ds), features=getattr(c4_ds, "features", None))
+c4_val = IterableDataset.from_generator(lambda: get_worker_sharded_generator(c4_val_ds), features=getattr(c4_val_ds, "features", None))
+c4_sent.is_generator_sharded = True
+c4_val.is_generator_sharded = True
 
 orc_ds = load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)
 wh_ds = load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)
