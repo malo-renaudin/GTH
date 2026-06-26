@@ -49,11 +49,13 @@ def sentence_generator(dataset):
                 yield {"text": sent}
 
 c4_sent = IterableDataset.from_generator(
-    lambda: sentence_generator(c4_ds)
+    lambda: sentence_generator(c4_ds),
+    features=getattr(c4_ds, "features", None)
 )
 
 c4_val = IterableDataset.from_generator(
-    lambda: sentence_generator(c4_val_ds)
+    lambda: sentence_generator(c4_val_ds),
+    features=getattr(c4_val_ds, "features", None)
 )
 
 orc_ds = load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)
@@ -98,31 +100,31 @@ class PackedStreamingDataset(IterableDataset):
             self.stream.set_epoch(epoch)
 
     def __iter__(self):
-        # handle worker-level sharding to avoid duplicate examples when
-        # using multiple dataloader workers. Some Hugging Face iterable
-        # datasets (especially interleaved ones) can raise when calling
-        # `shard()` after being serialized to worker processes; to avoid
-        # that we perform a simple index-based sharding here.
+        # Use Hugging Face `shard()` to split the iterable dataset per
+        # dataloader worker. This requires the underlying stream to
+        # support `.shard()` (e.g., HF IterableDatasets with `features`).
         worker_info = torch.utils.data.get_worker_info()
+        stream = self.stream
         if worker_info is not None:
             num_shards = worker_info.num_workers
             shard_idx = worker_info.id
-        else:
-            num_shards = 1
-            shard_idx = 0
+            if not hasattr(stream, "shard"):
+                raise RuntimeError(
+                    "Iterable dataset does not support Hugging Face `shard()`; "
+                    "cannot use multiple dataloader workers. Set `dataloader_num_workers=1` or convert sources to HF IterableDatasets with `features`."
+                )
+            try:
+                stream = stream.shard(num_shards=num_shards, index=shard_idx)
+            except TypeError:
+                # fallback to positional args for older datasets versions
+                stream = stream.shard(num_shards, shard_idx)
 
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
 
         eos = self.tokenizer.eos_token_id
 
-        # iterate over the underlying stream and keep only the items that
-        # belong to this worker (round-robin partitioning)
-        stream_iter = iter(self.stream)
-        for i, example in enumerate(stream_iter):
-            if (i % num_shards) != shard_idx:
-                continue
-
+        for example in stream:
             text_buffer.append(example["text"].strip())
 
             # ---- batch tokenize ----
