@@ -67,9 +67,31 @@ def main():
         print(" features:", getattr(ds, "features", None))
         ok, res = try_shard_and_head(ds, args.num_shards, args.shard_idx)
         if ok:
-            print("  shard.take(1) ->", res)
+            print("  original shard.take(1) ->", res)
         else:
-            print("  shard() error ->", res)
+            print("  original shard() error ->", res)
+
+        # Also test a wrapped version that recreates the iterator per-call
+        try:
+            if name == "c4_sent":
+                wrapped = IterableDataset.from_generator(lambda: sentence_generator(load_from_disk(c4_train_path).to_iterable_dataset()), features=getattr(load_from_disk(c4_train_path).to_iterable_dataset(), "features", None))
+            elif name == "orc_ds":
+                wrapped = IterableDataset.from_generator(lambda: iter(load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)), features=None)
+            elif name == "wh_ds":
+                wrapped = IterableDataset.from_generator(lambda: iter(load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)), features=None)
+            elif name == "svo_wh_ds":
+                wrapped = IterableDataset.from_generator(lambda: iter(load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)), features=None)
+            elif name == "svo_orc_ds":
+                wrapped = IterableDataset.from_generator(lambda: iter(load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)), features=None)
+            else:
+                wrapped = ds
+            ok2, res2 = try_shard_and_head(wrapped, args.num_shards, args.shard_idx)
+            if ok2:
+                print("  wrapped shard.take(1) ->", res2)
+            else:
+                print("  wrapped shard() error ->", res2)
+        except Exception as e:
+            print("  wrapped construction error ->", repr(e))
         print()
 
     # Try HF interleave on the per-source shards (simulate in-worker shards)
