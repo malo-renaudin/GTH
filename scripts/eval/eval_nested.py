@@ -51,9 +51,15 @@ with torch.no_grad():
 
         scores = {}
 
-        for word in ex["target_scores"]:
-            word_ids = tokenizer.encode(word, add_special_tokens=False)
+        # skip examples where any candidate is not a single token
+        all_word_ids = {word: tokenizer.encode(word, add_special_tokens=False) for word in ex["target_scores"]}
+        if any(len(ids) != 1 for ids in all_word_ids.values()):
+            for word, ids in all_word_ids.items():
+                if len(ids) != 1:
+                    print(f"Skipping example: '{word}' splits into multiple tokens: {ids}")
+            continue
 
+        for word, word_ids in all_word_ids.items():
             # build context progressively
             cur_input = inputs["input_ids"]
 
@@ -72,11 +78,7 @@ with torch.no_grad():
                     dim=1
                 )
 
-            # MEAN log-prob (length normalization)
-            scores[word] = log_probs / len(word_ids)
-
-            if len(word_ids) > 1:
-                print(f"Target '{word}' splits into multiple tokens: {word_ids}")
+            scores[word] = log_probs
 
         pred = max(scores, key=scores.get)
         gold = max(ex["target_scores"], key=ex["target_scores"].get)
