@@ -119,67 +119,71 @@ class PackedStreamingDataset(IterableDataset):
         # `self.stream` (fallback).
         stream = None
 
-        # filter out zero-probability sources
-        filtered = [(s, p) for s, p in zip(self.sources, self.probabilities or []) if p and p > 0]
-        srcs = [s for s, _ in filtered]
-        probs = [p for _, p in filtered]
+        if self.sources is None:
+            # Fallback: use the single pre-built stream directly
+            stream = self.stream
+        else:
+            # filter out zero-probability sources
+            filtered = [(s, p) for s, p in zip(self.sources, self.probabilities or [1.0] * len(self.sources)) if p and p > 0]
+            srcs = [s for s, _ in filtered]
+            probs = [p for _, p in filtered]
 
-        #shard dataset across workers and build an interleaved dataset per worker
-        num_shards = worker_info.num_workers
-        shard_idx = worker_info.id
-        sharded = []
-        for ds in srcs:
-            if hasattr(ds, "_ex_iterable") and type(ds._ex_iterable).__name__ == "GeneratorIterable":
-                # The generator wrapper handles worker assignment inside itself
-                sharded.append(ds)
-                continue
+            #shard dataset across workers and build an interleaved dataset per worker
+            num_shards = worker_info.num_workers
+            shard_idx = worker_info.id
+            sharded = []
+            for ds in srcs:
+                if hasattr(ds, "_ex_iterable") and type(ds._ex_iterable).__name__ == "GeneratorIterable":
+                    # The generator wrapper handles worker assignment inside itself
+                    sharded.append(ds)
+                    continue
 
-            # Try HF sharding first; if it fails (some streaming sources
-            # cannot be sharded after serialization), fall back to a
-            # per-worker generator wrapper that yields the round-robin
-            # slice for this worker.
+                # Try HF sharding first; if it fails (some streaming sources
+                # cannot be sharded after serialization), fall back to a
+                # per-worker generator wrapper that yields the round-robin
+                # slice for this worker.
+                try:
+                    sh = ds.shard(num_shards=num_shards, index=shard_idx)
+                except Exception:
+                    def _make_worker_slice(orig_ds, idx, n):
+                        def _gen():
+                            for i, item in enumerate(orig_ds):
+                                if (i % n) == idx:
+                                    yield item
+                        return _gen
+
+                    sh = IterableDataset.from_generator(
+                        _make_worker_slice(ds, shard_idx, num_shards),
+                        features=getattr(ds, "features", None)
+                    )
+                sharded.append(sh)
+            # Prefer HF interleaving; if it fails (e.g., empty shards cause
+            # feature inference to stop), fall back to a safe round-robin
+            # iterable built from the sharded iterators.
             try:
-                sh = ds.shard(num_shards=num_shards, index=shard_idx)
+                stream = interleave_datasets(sharded, probabilities=probs, seed=42 + self._epoch)
             except Exception:
-                def _make_worker_slice(orig_ds, idx, n):
-                    def _gen():
-                        for i, item in enumerate(orig_ds):
-                            if (i % n) == idx:
-                                yield item
-                    return _gen
+                def _round_robin(sharded_list):
+                    iters = [iter(s) for s in sharded_list]
+                    alive = [True] * len(iters)
+                    while any(alive):
+                        for i, it in enumerate(iters):
+                            if not alive[i]:
+                                continue
+                            try:
+                                yield next(it)
+                            except StopIteration:
+                                alive[i] = False
+                                continue
 
-                sh = IterableDataset.from_generator(
-                    _make_worker_slice(ds, shard_idx, num_shards),
-                    features=getattr(ds, "features", None)
-                )
-            sharded.append(sh)
-        # Prefer HF interleaving; if it fails (e.g., empty shards cause
-        # feature inference to stop), fall back to a safe round-robin
-        # iterable built from the sharded iterators.
-        try:
-            stream = interleave_datasets(sharded, probabilities=probs, seed=42 + self._epoch)
-        except Exception:
-            def _round_robin(sharded_list):
-                iters = [iter(s) for s in sharded_list]
-                alive = [True] * len(iters)
-                while any(alive):
-                    for i, it in enumerate(iters):
-                        if not alive[i]:
-                            continue
-                        try:
-                            yield next(it)
-                        except StopIteration:
-                            alive[i] = False
-                            continue
+                # attempt to reuse features from first available source
+                features = None
+                for s in sharded:
+                    features = getattr(s, "features", None)
+                    if features is not None:
+                        break
 
-            # attempt to reuse features from first available source
-            features = None
-            for s in sharded:
-                features = getattr(s, "features", None)
-                if features is not None:
-                    break
-
-            stream = IterableDataset.from_generator(lambda: _round_robin(sharded), features=features)
+                stream = IterableDataset.from_generator(lambda: _round_robin(sharded), features=features)
     
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
