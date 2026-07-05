@@ -52,7 +52,16 @@ with torch.no_grad():
         scores = {}
 
         # skip examples where any candidate is not a single token
-        all_word_ids = {word: tokenizer.encode(word, add_special_tokens=False) for word in ex["target_scores"]}
+        # Prefer the space-prefixed form (" eat") over the bare form ("eat")
+        # since GPT-2 BPE encodes mid-sentence words with a leading space.
+        def _best_ids(word):
+            spaced = tokenizer.encode(" " + word, add_special_tokens=False)
+            bare   = tokenizer.encode(word, add_special_tokens=False)
+            if len(spaced) == 1:
+                return spaced   # prefer " eat" over "eat" when both exist
+            return bare
+
+        all_word_ids = {word: _best_ids(word) for word in ex["target_scores"]}
         if any(len(ids) != 1 for ids in all_word_ids.values()):
             for word, ids in all_word_ids.items():
                 if len(ids) != 1:
