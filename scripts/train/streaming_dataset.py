@@ -28,6 +28,8 @@ argument_parser.add_argument("--svo_wh", type=float, default=0.05)
 argument_parser.add_argument("--svo_orc", type=float, default=0.05)
 args = argument_parser.parse_args()
 
+config = yaml.safe_load(open(args.config))
+
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
@@ -94,7 +96,7 @@ tokenizer.pad_token = tokenizer.eos_token
 
 
 class PackedStreamingDataset(IterableDataset):
-    def __init__(self, stream=None, tokenizer: PreTrainedTokenizer=None, block_size=1024, batch_text_size=512, sources=None, probabilities=None):
+    def __init__(self, stream=None, tokenizer: PreTrainedTokenizer=None, block_size=1024, batch_text_size=2048, sources=None, probabilities=None, num_workers=4):
         # If `sources` is provided, we will shard each source per-worker
         # and then call `interleave_datasets` on the per-source shards.
         self.stream = stream
@@ -104,6 +106,13 @@ class PackedStreamingDataset(IterableDataset):
         self.block_size = block_size
         self.batch_text_size = batch_text_size
         self._epoch = 0
+        self._num_workers = num_workers
+
+    @property
+    def n_shards(self) -> int:
+        # Tell HF/accelerate this dataset supports n_workers shards so
+        # DataLoader workers are not reduced to 1.
+        return self._num_workers
 
     def set_epoch(self, epoch):
         self._epoch = epoch
@@ -113,109 +122,47 @@ class PackedStreamingDataset(IterableDataset):
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
 
-        # Build the stream: either from per-source sharded interleaving
-        # (preferred when `sources` is provided) or from the single
-        # `self.stream` (fallback).
-        stream = None
-
         if self.sources is None:
-            # Fallback: use the single pre-built stream directly
+            # Validation path: shard the single stream across workers.
             stream = self.stream
+            if worker_info is not None and worker_info.num_workers > 1:
+                try:
+                    stream = stream.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+                except Exception:
+                    wid, nw, base = worker_info.id, worker_info.num_workers, stream
+                    stream = IterableDataset.from_generator(
+                        lambda: (item for i, item in enumerate(base) if i % nw == wid),
+                        features=getattr(stream, "features", None)
+                    )
         else:
-            # filter out zero-probability sources
+            # Training path: interleave all active sources with given probabilities.
+            # All sources are generator-based so no per-worker sharding is needed —
+            # each worker independently draws from the same infinite streams.
             filtered = [(s, p) for s, p in zip(self.sources, self.probabilities or [1.0] * len(self.sources)) if p and p > 0]
             srcs = [s for s, _ in filtered]
             probs = [p for _, p in filtered]
+            stream = interleave_datasets(srcs, probabilities=probs, seed=42 + self._epoch)
 
-            #shard dataset across workers and build an interleaved dataset per worker
-            num_shards = worker_info.num_workers
-            shard_idx = worker_info.id
-            sharded = []
-            for ds in srcs:
-                if hasattr(ds, "_ex_iterable") and type(ds._ex_iterable).__name__ == "GeneratorIterable":
-                    # The generator wrapper handles worker assignment inside itself
-                    sharded.append(ds)
-                    continue
-
-                # Try HF sharding first; if it fails (some streaming sources
-                # cannot be sharded after serialization), fall back to a
-                # per-worker generator wrapper that yields the round-robin
-                # slice for this worker.
-                try:
-                    sh = ds.shard(num_shards=num_shards, index=shard_idx)
-                except Exception:
-                    def _make_worker_slice(orig_ds, idx, n):
-                        def _gen():
-                            for i, item in enumerate(orig_ds):
-                                if (i % n) == idx:
-                                    yield item
-                        return _gen
-
-                    sh = IterableDataset.from_generator(
-                        _make_worker_slice(ds, shard_idx, num_shards),
-                        features=getattr(ds, "features", None)
-                    )
-                sharded.append(sh)
-            # Prefer HF interleaving; if it fails (e.g., empty shards cause
-            # feature inference to stop), fall back to a safe round-robin
-            # iterable built from the sharded iterators.
-            try:
-                stream = interleave_datasets(sharded, probabilities=probs, seed=42 + self._epoch)
-            except Exception:
-                def _round_robin(sharded_list):
-                    iters = [iter(s) for s in sharded_list]
-                    alive = [True] * len(iters)
-                    while any(alive):
-                        for i, it in enumerate(iters):
-                            if not alive[i]:
-                                continue
-                            try:
-                                yield next(it)
-                            except StopIteration:
-                                alive[i] = False
-                                continue
-
-                # attempt to reuse features from first available source
-                features = None
-                for s in sharded:
-                    features = getattr(s, "features", None)
-                    if features is not None:
-                        break
-
-                stream = IterableDataset.from_generator(lambda: _round_robin(sharded), features=features)
-    
         buffer = torch.empty((0,), dtype=torch.long)
         text_buffer = []
-
-        eos = self.tokenizer.eos_token_id
 
         for example in stream:
             text_buffer.append(example["text"].strip())
 
-            # ---- batch tokenize ----
             if len(text_buffer) >= self.batch_text_size:
-
                 enc = self.tokenizer(
                     [t + self.tokenizer.eos_token for t in text_buffer],
                     add_special_tokens=False
                 )["input_ids"]
-
-                # convert each list of ids to a tensor and concatenate efficiently
-                flat = torch.cat([torch.tensor(x, dtype=torch.long) for x in enc]) if len(enc) > 0 else torch.empty((0,), dtype=torch.long)
-
+                flat = torch.cat([torch.tensor(x, dtype=torch.long) for x in enc]) if enc else torch.empty((0,), dtype=torch.long)
                 buffer = torch.cat([buffer, flat])
-
                 text_buffer = []
 
-            # ---- tensor-based packing ----
             while buffer.size(0) >= self.block_size:
-
                 chunk = buffer[:self.block_size]
                 buffer = buffer[self.block_size:]
-
                 yield {
                     "input_ids": chunk,
-                    "labels": chunk.clone(),
                     "attention_mask": torch.ones_like(chunk)
                 }
 train_dataset = PackedStreamingDataset(
@@ -235,17 +182,18 @@ train_dataset = PackedStreamingDataset(
         args.wh,
         args.svo_wh,
         args.svo_orc
-    ]
+    ],
+    num_workers=config.get("dataloader_num_workers", 4)
 )
 c4_val_truncated = c4_val.take(10000)
+_num_workers = config.get("dataloader_num_workers", 4)
 
 validation_dataset = PackedStreamingDataset(
     c4_val_truncated,
     tokenizer,
-    block_size=1024
+    block_size=1024,
+    num_workers=_num_workers
 )
-
-config = yaml.safe_load(open(args.config))
 
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
