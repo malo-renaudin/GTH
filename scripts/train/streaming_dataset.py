@@ -1,5 +1,5 @@
 import random
-from datasets import load_dataset, interleave_datasets, IterableDataset, load_from_disk
+from datasets import load_dataset, interleave_datasets, IterableDataset, load_from_disk, Features, Value
 from transformers import (
     AutoTokenizer,
     AutoConfig,
@@ -33,9 +33,6 @@ config = yaml.safe_load(open(args.config))
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
-c4_ds = load_from_disk(c4_train_path).to_iterable_dataset()
-c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset()
-
 _sentence_splitter = re.compile(r"(?<=[.!?])\s+")
 
 def sentence_generator(dataset, worker_id=0, num_workers=1):
@@ -50,43 +47,36 @@ def sentence_generator(dataset, worker_id=0, num_workers=1):
             if sent:
                 yield {"text": sent}
 
-# A small helper function that checks PyTorch's current worker on-the-fly
-def get_worker_sharded_generator(base_ds):
-    worker_info = torch.utils.data.get_worker_info()
-    if worker_info is None:
-        return sentence_generator(base_ds, worker_id=0, num_workers=1)
-    return sentence_generator(base_ds, worker_id=worker_info.id, num_workers=worker_info.num_workers)
+# All sources yield only {"text": str} — declare this explicitly so
+# interleave_datasets never needs to call _head() to infer features,
+# which would fail inside DataLoader worker processes.
+text_features = Features({"text": Value("string")})
 
-# Re-define your datasets so each worker (and HF probes) get a fresh iterator
-# For C4 (Arrow), capture features once and recreate the iterable per call.
-c4_features = getattr(c4_ds, "features", None)
 c4_sent = IterableDataset.from_generator(
     lambda: sentence_generator(load_from_disk(c4_train_path).to_iterable_dataset()),
-    features=c4_features,
+    features=text_features,
 )
 c4_val = IterableDataset.from_generator(
     lambda: sentence_generator(load_from_disk(c4_val_path).to_iterable_dataset()),
-    features=c4_features,
+    features=text_features,
 )
-c4_sent.is_generator_sharded = True
-c4_val.is_generator_sharded = True
 
 # Wrap text-file streaming sources so each call creates a fresh streaming dataset
 orc_ds = IterableDataset.from_generator(
     lambda: iter(load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)),
-    features=None,
+    features=text_features,
 )
 wh_ds = IterableDataset.from_generator(
     lambda: iter(load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)),
-    features=None,
+    features=text_features,
 )
 svo_wh_ds = IterableDataset.from_generator(
     lambda: iter(load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)),
-    features=None,
+    features=text_features,
 )
 svo_orc_ds = IterableDataset.from_generator(
     lambda: iter(load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)),
-    features=None,
+    features=text_features,
 )
 
 
