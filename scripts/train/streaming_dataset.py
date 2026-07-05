@@ -7,7 +7,6 @@ from transformers import (
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
-    EarlyStoppingCallback,
     PreTrainedTokenizer
 )
 import nltk
@@ -270,8 +269,9 @@ training_args = TrainingArguments(
     save_steps=config.get("save_steps", 500),
     learning_rate=config.get("learning_rate", 5e-5),#grid
     # num_train_epochs=config.get("num_train_epochs", 3),
-    max_steps=250000,
-    weight_decay=config.get("weight_decay", 0.01),#grid
+    max_steps=30500,
+    weight_decay=config.get("weight_decay", 0.1),
+    adam_beta2=config.get("adam_beta2", 0.95),
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
     dataloader_num_workers=config.get("dataloader_num_workers", 4),
@@ -281,9 +281,6 @@ training_args = TrainingArguments(
     gradient_accumulation_steps=config.get("gradient_accumulation_steps", 1),
     bf16=True, 
     optim="adamw_torch_fused",
-    load_best_model_at_end=True,   # IMPORTANT
-    metric_for_best_model="eval_loss",
-    greater_is_better=False,
     warmup_ratio=config.get("warmup_ratio", 0.1),
 )
 
@@ -298,8 +295,7 @@ trainer = Trainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
-    data_collator = data_collator,
+    data_collator=data_collator,
 )
 
 trainer.train()
