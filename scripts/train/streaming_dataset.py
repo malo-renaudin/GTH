@@ -1,5 +1,6 @@
 import random
 from datasets import load_dataset, interleave_datasets, IterableDataset, load_from_disk, Features, Value
+from torch.utils.data import IterableDataset as TorchIterableDataset
 from transformers import (
     AutoTokenizer,
     AutoConfig,
@@ -85,10 +86,9 @@ tokenizer.pad_token = tokenizer.eos_token
 
 
 
-class PackedStreamingDataset(IterableDataset):
+class PackedStreamingDataset(TorchIterableDataset):
     def __init__(self, stream=None, tokenizer: PreTrainedTokenizer=None, block_size=1024, batch_text_size=2048, sources=None, probabilities=None, num_workers=4):
-        # If `sources` is provided, we will shard each source per-worker
-        # and then call `interleave_datasets` on the per-source shards.
+        super().__init__()
         self.stream = stream
         self.sources = sources
         self.probabilities = probabilities
@@ -97,12 +97,6 @@ class PackedStreamingDataset(IterableDataset):
         self.batch_text_size = batch_text_size
         self._epoch = 0
         self._num_workers = num_workers
-
-    @property
-    def n_shards(self) -> int:
-        # Tell HF/accelerate this dataset supports n_workers shards so
-        # DataLoader workers are not reduced to 1.
-        return self._num_workers
 
     def set_epoch(self, epoch):
         self._epoch = epoch
