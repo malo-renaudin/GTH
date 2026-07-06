@@ -106,66 +106,53 @@ class PackedStreamingDataset(TorchIterableDataset):
         self.seed            = seed
 
     def __iter__(self):
-        # ---- global partition identity ----------------------------------------
         worker_info = torch.utils.data.get_worker_info()
-        worker_id   = worker_info.id          if worker_info is not None else 0
-        num_workers = worker_info.num_workers if worker_info is not None else 1
-        try:
-            rank       = torch.distributed.get_rank()
-            world_size = torch.distributed.get_world_size()
-        except RuntimeError:
-            rank, world_size = 0, 1
+        worker_id = worker_info.id if worker_info is not None else 0
 
-        total_slots = world_size * num_workers
-        my_slot     = rank * num_workers + worker_id
+        rng = random.Random(self.seed + worker_id)
 
-        # ---- source setup ----------------------------------------------------
         active = [(ld, p) for ld, p in zip(self.source_loaders, self.probabilities) if p > 0]
         loaders, probs = zip(*active)
-        total   = sum(probs)
+        total = sum(probs)
         weights = [p / total for p in probs]
 
-        # Same seed everywhere → identical global conceptual stream on every worker
-        rng   = random.Random(self.seed)
         iters = [iter(ld()) for ld in loaders]
 
-        eos          = self.tokenizer.eos_token
-        buffer       = []
-        batch        = []
-        global_index = 0
+        eos = self.tokenizer.eos_token
+        buffer = []
+        batch = []
 
         while True:
-            # Advance global stream (cheap: just RNG + source read, no tokenization)
             idx = rng.choices(range(len(loaders)), weights=weights)[0]
+
             try:
                 example = next(iters[idx])
             except StopIteration:
                 iters[idx] = iter(loaders[idx]())
-                example    = next(iters[idx])
+                example = next(iters[idx])
 
-            # ---- DP + worker partition filter --------------------------------
-            if global_index % total_slots == my_slot:
-                batch.append(example["text"].strip())
+            batch.append(example["text"].strip())
 
-                if len(batch) >= self.batch_text_size:
-                    ids_list = self.tokenizer(
-                        [t + eos for t in batch], add_special_tokens=False
-                    )["input_ids"]
-                    for ids in ids_list:
-                        buffer.extend(ids)
-                    batch = []
+            if len(batch) >= self.batch_text_size:
+                ids_list = self.tokenizer(
+                    [t + eos for t in batch],
+                    add_special_tokens=False
+                )["input_ids"]
 
-                while len(buffer) >= self.block_size:
-                    chunk = torch.tensor(buffer[:self.block_size], dtype=torch.long)
-                    buffer = buffer[self.block_size:]
-                    yield {
-                        "input_ids":      chunk,
-                        "labels":         chunk.clone(),
-                        "attention_mask": torch.ones_like(chunk),
-                    }
+                for ids in ids_list:
+                    buffer.extend(ids)
 
-            global_index += 1
+                batch = []
 
+            while len(buffer) >= self.block_size:
+                chunk = torch.tensor(buffer[:self.block_size], dtype=torch.long)
+                buffer = buffer[self.block_size:]
+
+                yield {
+                    "input_ids": chunk,
+                    "labels": chunk.clone(),
+                    "attention_mask": torch.ones_like(chunk),
+                }
 
 # ---------------------------------------------------------------------------
 # Dataset instantiation
