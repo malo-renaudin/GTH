@@ -1,5 +1,5 @@
 import random
-from datasets import load_from_disk, load_dataset, interleave_datasets
+from datasets import load_from_disk, load_dataset
 from torch.utils.data import IterableDataset as TorchIterableDataset
 from transformers import (
     AutoTokenizer,
@@ -34,72 +34,162 @@ _n_workers = config.get("dataloader_num_workers", 4)
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path   = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
-# C4: sharded so HF assigns one shard per DataLoader worker
-c4_train_ds = load_from_disk(c4_train_path).to_iterable_dataset(num_shards=_n_workers)
-c4_val_ds   = load_from_disk(c4_val_path).to_iterable_dataset(num_shards=_n_workers)
-
-# Text-file sources (one sentence per line; small files, HF streams them)
-orc_ds     = load_dataset("text", data_files="data/orc7.txt",                      split="train", streaming=True)
-wh_ds      = load_dataset("text", data_files="data/wh5.txt",                       split="train", streaming=True)
-svo_wh_ds  = load_dataset("text", data_files="data/declaratives_from_wh5.txt",     split="train", streaming=True)
-svo_orc_ds = load_dataset("text", data_files="data/declaratives_from_orc7.txt",    split="train", streaming=True)
-
 tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.model_max_length = int(1e30)  # suppress spurious long-sequence warnings
 
-# Build the interleaved training stream once.
-# n_shards = _n_workers (C4) + n_active_text_sources ≥ _n_workers
-# → HF assigns shards to workers without killing any worker.
-_candidates = [
-    (c4_train_ds, args.c4),
-    (orc_ds,      args.orc),
-    (wh_ds,       args.wh),
-    (svo_wh_ds,   args.svo_wh),
-    (svo_orc_ds,  args.svo_orc),
-]
-_active_srcs, _active_probs = zip(*[(ds, p) for ds, p in _candidates if p > 0])
-train_stream = interleave_datasets(list(_active_srcs), probabilities=list(_active_probs), seed=42)
 
+# ---------------------------------------------------------------------------
+# Source loaders — callables that return a fresh iterable of {"text": str}.
+# Using map-style Dataset (load_from_disk / load_dataset without streaming)
+# avoids HF's multi-worker shard check, so every DataLoader worker can safely
+# and independently iterate its own copy of the data.
+# ---------------------------------------------------------------------------
+
+def _c4_train_loader():
+    """Infinite generator over C4 training documents."""
+    ds = load_from_disk(c4_train_path)          # Arrow, memory-mapped — safe for concurrent reads
+    while True:
+        for ex in ds:
+            yield {"text": ex["text"]}
+
+def _c4_val_loader():
+    """Single-pass generator over C4 validation documents."""
+    ds = load_from_disk(c4_val_path)
+    for ex in ds:
+        yield {"text": ex["text"]}
+
+def _make_text_loader(filepath):
+    """Returns an infinite-cycling loader for a line-per-sentence text file."""
+    def loader():
+        ds = load_dataset("text", data_files=filepath, split="train")  # map-style, fits in RAM
+        while True:
+            for ex in ds:
+                yield {"text": ex["text"]}
+    return loader
+
+
+# ---------------------------------------------------------------------------
+# Dataset class
+# ---------------------------------------------------------------------------
 
 class PackedStreamingDataset(TorchIterableDataset):
-    """Packs a streaming HF IterableDataset into fixed block_size-token chunks.
-    HF assigns dataset shards to DataLoader workers automatically via
-    stream.__iter__(); no manual worker logic is needed here.
     """
-    def __init__(self, stream, tokenizer: PreTrainedTokenizer,
-                 block_size: int = 1024, batch_text_size: int = 512):
+    Megatron-style data-parallel streaming dataset.
+
+    All workers/ranks generate the same deterministic global sample sequence
+    from the same RNG seed.  Each (rank × worker) slot keeps only the samples
+    whose global index satisfies:
+
+        global_index % (world_size * num_workers) == rank * num_workers + worker_id
+
+    This gives non-overlapping, exhaustive coverage of the stream without any
+    physical data duplication.  Source reads for filtered-out samples are cheap
+    (no tokenization); only kept samples are tokenized and packed.
+    """
+
+    def __init__(
+        self,
+        source_loaders,             # list[callable[() -> Iterable[{"text": str}]]]
+        probabilities,              # sampling weights (need not sum to 1)
+        tokenizer: PreTrainedTokenizer,
+        block_size: int = 1024,
+        batch_text_size: int = 512,
+        seed: int = 42,
+    ):
         super().__init__()
-        self.stream = stream
-        self.tokenizer = tokenizer
-        self.block_size = block_size
+        self.source_loaders  = source_loaders
+        self.probabilities   = probabilities
+        self.tokenizer       = tokenizer
+        self.block_size      = block_size
         self.batch_text_size = batch_text_size
+        self.seed            = seed
 
     def __iter__(self):
-        eos    = self.tokenizer.eos_token
-        buffer = []
-        batch  = []
+        # ---- global partition identity ----------------------------------------
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id   = worker_info.id          if worker_info is not None else 0
+        num_workers = worker_info.num_workers if worker_info is not None else 1
+        try:
+            rank       = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+        except RuntimeError:
+            rank, world_size = 0, 1
 
-        for example in self.stream:   # HF distributes shards to workers here
-            batch.append(example["text"].strip())
+        total_slots = world_size * num_workers
+        my_slot     = rank * num_workers + worker_id
 
-            if len(batch) >= self.batch_text_size:
-                ids_list = self.tokenizer(
-                    [t + eos for t in batch], add_special_tokens=False
-                )["input_ids"]
-                for ids in ids_list:
-                    buffer.extend(ids)
-                batch = []
+        # ---- source setup ----------------------------------------------------
+        active = [(ld, p) for ld, p in zip(self.source_loaders, self.probabilities) if p > 0]
+        loaders, probs = zip(*active)
+        total   = sum(probs)
+        weights = [p / total for p in probs]
 
-            while len(buffer) >= self.block_size:
-                chunk = torch.tensor(buffer[:self.block_size], dtype=torch.long)
-                buffer = buffer[self.block_size:]
-                yield {"input_ids": chunk, "labels": chunk.clone(),
-                       "attention_mask": torch.ones_like(chunk)}
+        # Same seed everywhere → identical global conceptual stream on every worker
+        rng   = random.Random(self.seed)
+        iters = [iter(ld()) for ld in loaders]
+
+        eos          = self.tokenizer.eos_token
+        buffer       = []
+        batch        = []
+        global_index = 0
+
+        while True:
+            # Advance global stream (cheap: just RNG + source read, no tokenization)
+            idx = rng.choices(range(len(loaders)), weights=weights)[0]
+            try:
+                example = next(iters[idx])
+            except StopIteration:
+                iters[idx] = iter(loaders[idx]())
+                example    = next(iters[idx])
+
+            # ---- DP + worker partition filter --------------------------------
+            if global_index % total_slots == my_slot:
+                batch.append(example["text"].strip())
+
+                if len(batch) >= self.batch_text_size:
+                    ids_list = self.tokenizer(
+                        [t + eos for t in batch], add_special_tokens=False
+                    )["input_ids"]
+                    for ids in ids_list:
+                        buffer.extend(ids)
+                    batch = []
+
+                while len(buffer) >= self.block_size:
+                    chunk = torch.tensor(buffer[:self.block_size], dtype=torch.long)
+                    buffer = buffer[self.block_size:]
+                    yield {
+                        "input_ids":      chunk,
+                        "labels":         chunk.clone(),
+                        "attention_mask": torch.ones_like(chunk),
+                    }
+
+            global_index += 1
 
 
-train_dataset = PackedStreamingDataset(train_stream, tokenizer)
-validation_dataset = PackedStreamingDataset(c4_val_ds.take(10000), tokenizer)
+# ---------------------------------------------------------------------------
+# Dataset instantiation
+# ---------------------------------------------------------------------------
+
+_train_candidates = [
+    (_c4_train_loader,                                  args.c4),
+    (_make_text_loader("data/orc7.txt"),                args.orc),
+    (_make_text_loader("data/wh5.txt"),                 args.wh),
+    (_make_text_loader("data/declaratives_from_wh5.txt"), args.svo_wh),
+    (_make_text_loader("data/declaratives_from_orc7.txt"), args.svo_orc),
+]
+
+train_dataset = PackedStreamingDataset(
+    source_loaders=[ld for ld, p in _train_candidates if p > 0],
+    probabilities=[p  for ld, p in _train_candidates if p > 0],
+    tokenizer=tokenizer,
+)
+
+validation_dataset = PackedStreamingDataset(
+    source_loaders=[_c4_val_loader],
+    probabilities=[1.0],
+    tokenizer=tokenizer,
+)
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
                                        local_files_only=True,
