@@ -14,6 +14,7 @@ from transformers import (
 import argparse
 import yaml
 import torch
+from log_scale_callback import LogScaleCallback
 
 
 argument_parser = argparse.ArgumentParser()
@@ -26,6 +27,11 @@ argument_parser.add_argument("--orc", type=float, default=0)
 argument_parser.add_argument("--wh", type=float, default=0)
 argument_parser.add_argument("--svo_wh", type=float, default=0.05)
 argument_parser.add_argument("--svo_orc", type=float, default=0.05)
+argument_parser.add_argument("--log-scale-n-points",   type=int, default=20)
+argument_parser.add_argument("--log-scale-start-step", type=int, default=100)
+argument_parser.add_argument("--blimp-dir",            type=str, default=None)
+argument_parser.add_argument("--nested-eval-dataset",  type=str, default=None)
+argument_parser.add_argument("--eval-results-dir",     type=str, default=None)
 args = argument_parser.parse_args()
 
 config = yaml.safe_load(open(args.config))
@@ -191,12 +197,9 @@ training_args = TrainingArguments(
     per_device_train_batch_size=config.get("train_batch_size", 4),
     do_eval = True,
     do_train = True,
-    eval_strategy="steps",   
-    # evaluate_during_training=True,
-    save_strategy="steps",
+    eval_strategy="no",
+    save_strategy="no",
     lr_scheduler_type="cosine",
-    eval_steps=config.get("eval_steps", 500),
-    save_steps=config.get("save_steps", 500),
     learning_rate=config.get("learning_rate", 5e-5),#grid
     # num_train_epochs=config.get("num_train_epochs", 3),
     max_steps=30500,
@@ -224,13 +227,26 @@ data_collator = DataCollatorForLanguageModeling(
     mlm=False
 )
 
+callbacks = []
+if args.blimp_dir or args.nested_eval_dataset:
+    callbacks.append(LogScaleCallback(
+        max_steps           = training_args.max_steps,
+        n_points            = args.log_scale_n_points,
+        start_step          = args.log_scale_start_step,
+        output_dir          = args.output_dir,
+        tokenizer           = tokenizer,
+        blimp_dir           = args.blimp_dir,
+        nested_eval_dataset = args.nested_eval_dataset,
+        eval_results_dir    = args.eval_results_dir,
+    ))
+
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
     data_collator=data_collator,
-
+    callbacks=callbacks,
 )
 
 trainer.train()
