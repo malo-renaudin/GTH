@@ -78,7 +78,7 @@ c4_val.is_generator_sharded = True
 # gets one full copy of the file — correct probabilities across all workers.
 def _text_source(filepath):
     return concatenate_datasets([
-        load_dataset("text", data_files=filepath, split="train", streaming=True).repeat()
+        load_dataset("text", data_files=filepath, split="train", streaming=True)
         for _ in range(_n_workers)
     ])
 
