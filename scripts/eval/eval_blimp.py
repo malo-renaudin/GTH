@@ -29,9 +29,7 @@ from typing import List, Tuple
 import torch
 from tqdm import tqdm
 
-from litgpt import Tokenizer
-
-from utils import load_checkpoint, resolve_checkpoint_file, step_from_checkpoint
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +86,7 @@ def compute_pair_scores_batch(
         x = torch.tensor(padded, device=device)  # (B, max_len)
 
         with torch.no_grad():
-            logits = model(x)  # (B, max_len, vocab)
+            logits = model(input_ids=x).logits  # (B, max_len, vocab)
         lp = torch.log_softmax(logits, dim=-1)  # (B, max_len, vocab)
 
         for i, s in enumerate(batch_seqs):
@@ -107,17 +105,20 @@ def compute_pair_scores_batch(
 # ---------------------------------------------------------------------------
 
 def evaluate_checkpoint(
-    ckpt_file: Path,
-    tokenizer: Tokenizer,
-    paradigms: List[dict],  # list of {uid, field, linguistics_term, pairs: [(good_ids, bad_ids, pairID)]}
-    max_seq_length: int,
+    ckpt_dir: Path,
+    tokenizer,
+    paradigms: List[dict],
     device: torch.device,
     batch_size: int = 32,
 ) -> Tuple[List[dict], List[dict]]:
     """Return (pair_rows, paradigm_rows) for one checkpoint."""
-    step = step_from_checkpoint(ckpt_file)
-    print(f"\n=== step {step} ===")
-    model = load_checkpoint(ckpt_file, device, max_seq_length)
+    name = ckpt_dir.name
+    step = int(name.split("-")[-1]) if "-" in name else 0
+    print(f"\n=== {name} (step {step}) ===")
+    model = AutoModelForCausalLM.from_pretrained(
+        ckpt_dir, local_files_only=True
+    ).to(device)
+    model.eval()
 
     pair_rows: List[dict] = []
     paradigm_rows: List[dict] = []
@@ -179,7 +180,7 @@ def evaluate_checkpoint(
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_paradigms(blimp_dir: Path, tokenizer: Tokenizer) -> List[dict]:
+def load_paradigms(blimp_dir: Path, tokenizer) -> List[dict]:
     """Load all .jsonl files in blimp_dir and tokenize sentences."""
     jsonl_files = sorted(blimp_dir.glob("*.jsonl"))
     if not jsonl_files:
@@ -202,8 +203,8 @@ def load_paradigms(blimp_dir: Path, tokenizer: Tokenizer) -> List[dict]:
                     linguistics_term = item["linguistics_term"]
                 sent_good = item["sentence_good"]
                 sent_bad = item["sentence_bad"]
-                good_ids = tokenizer.encode(sent_good, bos=True, eos=False).tolist()
-                bad_ids = tokenizer.encode(sent_bad, bos=True, eos=False).tolist()
+                good_ids = tokenizer.encode(sent_good)
+                bad_ids = tokenizer.encode(sent_bad)
                 pairs.append((good_ids, bad_ids, item["pairID"], sent_good, sent_bad))
 
         paradigms.append({
@@ -232,26 +233,28 @@ def main() -> None:
 
     p.add_argument("--blimp-dir", type=Path, required=True,
                    help="Directory containing BLiMP .jsonl paradigm files.")
-    p.add_argument("--tokenizer-dir", type=Path, default=Path("checkpoints/gpt2"))
+    p.add_argument("--tokenizer-dir", type=Path, default=None,
+                   help="HF tokenizer directory. Defaults to --checkpoint or --checkpoint-dir.")
     p.add_argument("--output-csv", type=Path, required=True,
                    help="Output CSV for per-pair results.")
-    p.add_argument("--max-seq-length", type=int, default=0)
     p.add_argument("--batch-size", type=int, default=32)
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = Tokenizer(args.tokenizer_dir)
+    tok_path = args.tokenizer_dir or args.checkpoint or args.checkpoint_dir
+    tokenizer = AutoTokenizer.from_pretrained(tok_path, local_files_only=True)
 
     # Resolve checkpoints
     if args.checkpoint is not None:
-        ckpts = [resolve_checkpoint_file(args.checkpoint)]
+        ckpts = [args.checkpoint]
     else:
         ckpts = sorted(
-            args.checkpoint_dir.glob("step-*/lit_model.pth"),
-            key=lambda x: int(x.parent.name.split("-")[1]),
+            [d for d in args.checkpoint_dir.iterdir()
+             if d.is_dir() and d.name.startswith("checkpoint-")],
+            key=lambda d: int(d.name.split("-")[-1]),
         )
         if not ckpts:
-            raise FileNotFoundError(f"No step checkpoints found in {args.checkpoint_dir}")
+            raise FileNotFoundError(f"No checkpoint-* directories found in {args.checkpoint_dir}")
 
     # Load & tokenize BLiMP data once
     paradigms = load_paradigms(args.blimp_dir, tokenizer)
@@ -262,7 +265,7 @@ def main() -> None:
     for ckpt_file in ckpts:
         pair_rows, paradigm_rows = evaluate_checkpoint(
             ckpt_file, tokenizer, paradigms,
-            args.max_seq_length, device, args.batch_size,
+            device, args.batch_size,
         )
         all_pair_rows.extend(pair_rows)
         all_paradigm_rows.extend(paradigm_rows)
