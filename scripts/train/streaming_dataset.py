@@ -245,11 +245,12 @@ train_dataset = PackedStreamingDataset(
 c4_val_truncated = c4_val_ds.take(10000)
 
 validation_dataset = PackedStreamingDataset(
-    c4_val_truncated,
-    tokenizer,
-    block_size=1024
+    stream=None,
+    tokenizer=tokenizer,
+    block_size=1024,
+    sources=[c4_val_truncated],
+    probabilities=[1.0]
 )
-
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
                                        local_files_only=True,
