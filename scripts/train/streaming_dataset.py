@@ -35,8 +35,8 @@ _n_workers = config.get("dataloader_num_workers", 4)
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
-c4_ds = load_from_disk(c4_train_path).to_iterable_dataset()
-c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset()
+c4_ds     = load_from_disk(c4_train_path).to_iterable_dataset(num_shards=_n_workers)
+c4_val_ds = load_from_disk(c4_val_path).to_iterable_dataset(num_shards=_n_workers)
 
 _sentence_splitter = re.compile(r"(?<=[.!?])\s+")
 
@@ -90,6 +90,7 @@ svo_orc_ds = _text_source("data/declaratives_from_orc7.txt")
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
+tokenizer.model_max_length = int(1e30)  # suppress spurious long-sequence warnings
 
 
 
