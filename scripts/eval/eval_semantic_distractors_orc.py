@@ -31,14 +31,25 @@ from typing import Dict, List, Tuple
 import torch
 from tqdm import tqdm
 
-from litgpt import Tokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from utils import (
-    load_checkpoint,
-    np_chain_logprob,
-    resolve_checkpoint_file,
-    step_from_checkpoint,
-)
+
+def _np_chain_prob(
+    model, x_ctx: torch.Tensor, ids: List[int],
+    device: torch.device, first_step_probs=None,
+) -> float:
+    """Product of P(t_i | ctx, t_0..t_{i-1}) for each token id in ids."""
+    prob = 1.0
+    cur  = x_ctx.clone()
+    for i, tid in enumerate(ids):
+        if i == 0 and first_step_probs is not None:
+            p = first_step_probs[tid].item()
+        else:
+            with torch.no_grad():
+                p = torch.softmax(model(input_ids=cur).logits[0, -1], dim=-1)[tid].item()
+        prob *= p
+        cur = torch.cat([cur, torch.tensor([[tid]], device=device)], dim=1)
+    return prob
 
 CSV_FIELDS = [
     "step", "structure", "gap_verb",
@@ -54,26 +65,24 @@ CSV_FIELDS = [
 # ---------------------------------------------------------------------------
 
 def compute_one_checkpoint(
-    ckpt_file:      Path,
-    tokenizer_dir:  Path,
-    csv_rows:       List[dict],
-    max_seq_length: int,
-    batch_size:     int = 32,
+    ckpt_dir:   Path,
+    tokenizer,
+    csv_rows:   List[dict],
+    batch_size: int = 32,
 ) -> List[dict]:
-    device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = Tokenizer(tokenizer_dir)
-    model     = load_checkpoint(ckpt_file, device, max_seq_length)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model  = AutoModelForCausalLM.from_pretrained(ckpt_dir, local_files_only=True).to(device)
+    model.eval()
 
     # Pre-tokenize every row from the CSV
     # Each item: (pre_gap_ids, moved_ids, distractor_ids_list, verb, moved_np_animacy)
     items: List[Tuple[List[int], List[int], List[List[int]], str, str]] = []
     skipped = 0
     for row in csv_rows:
-        pre_gap_ids = tokenizer.encode(row["pre_gap_text"], bos=True, eos=False).tolist()
-        moved_ids   = tokenizer.encode(" " + row["moved_np"], bos=False, eos=False).tolist()
-        # plausible_objects is "the pizza|the cake|..." — tokenise each
+        pre_gap_ids = tokenizer.encode(row["pre_gap_text"], add_special_tokens=False)
+        moved_ids   = tokenizer.encode(" " + row["moved_np"], add_special_tokens=False)
         distractor_ids_list = [
-            tokenizer.encode(" " + obj.strip(), bos=False, eos=False).tolist()
+            tokenizer.encode(" " + obj.strip(), add_special_tokens=False)
             for obj in row["plausible_objects"].split("|")
             if obj.strip()
         ]
@@ -99,7 +108,7 @@ def compute_one_checkpoint(
             [c + [0] * (max_ctx - len(c)) for c in contexts], device=device
         )
         with torch.no_grad():
-            logits_batch = model(x_batch)
+            logits_batch = model(input_ids=x_batch).logits
 
         for i, (pre_gap_ids, moved_ids, distractor_ids_list, verb, animacy) in enumerate(batch):
             sp    = torch.softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
@@ -108,8 +117,8 @@ def compute_one_checkpoint(
             def geomean_prob(ids: List[int]) -> float:
                 if not ids:
                     return float("nan")
-                lp = np_chain_logprob(model, x_ctx, ids, device, first_step_probs=sp)
-                return lp ** (1.0 / len(ids))
+                prob = _np_chain_prob(model, x_ctx, ids, device, first_step_probs=sp)
+                return prob ** (1.0 / len(ids))
 
             # --- Moved NP ---
             moved_mass = geomean_prob(moved_ids)
@@ -127,7 +136,8 @@ def compute_one_checkpoint(
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    step = step_from_checkpoint(ckpt_file)
+    name = ckpt_dir.name
+    step = int(name.split("-")[-1]) if "-" in name else 0
 
     # Build one row per verb (+ one "all" aggregate row)
     rows = []
@@ -221,10 +231,10 @@ def main() -> None:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--checkpoint", type=Path)
     g.add_argument("--checkpoint-dir", type=Path)
-    p.add_argument("--tokenizer-dir", type=Path, default=Path("checkpoints/gpt2"))
+    p.add_argument("--tokenizer-dir", type=Path, default=None,
+                   help="HF tokenizer directory. Defaults to --checkpoint or --checkpoint-dir.")
     p.add_argument("--input-csv", type=Path, required=True,
                    help="CSV produced by generate_simple_datasets/orc_semantic_distractors.py")
-    p.add_argument("--max-seq-length", type=int, default=0)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--result-name", type=Path,
                    default=Path("results/eval_semantic_distractors_orc.csv"))
@@ -237,21 +247,23 @@ def main() -> None:
     n_inan = sum(1 for r in csv_rows if r["moved_np_animacy"] == "inanimate")
     print(f"  animate filler: {n_anim}, inanimate filler: {n_inan}")
 
+    tok_path  = args.tokenizer_dir or args.checkpoint or args.checkpoint_dir
+    tokenizer = AutoTokenizer.from_pretrained(tok_path, local_files_only=True)
+
     if args.checkpoint is not None:
-        ckpts = [resolve_checkpoint_file(args.checkpoint)]
+        ckpts = [args.checkpoint]
     else:
         ckpts = sorted(
-            args.checkpoint_dir.glob("step-*/lit_model.pth"),
-            key=lambda x: int(x.parent.name.split("-")[1]),
+            [d for d in args.checkpoint_dir.iterdir()
+             if d.is_dir() and d.name.startswith("checkpoint-")],
+            key=lambda d: int(d.name.split("-")[-1]),
         )
         if not ckpts:
-            raise FileNotFoundError(f"No step checkpoints found under {args.checkpoint_dir}")
+            raise FileNotFoundError(f"No checkpoint-* directories found in {args.checkpoint_dir}")
 
     all_rows = []
-    for ckpt_file in tqdm(ckpts, desc="checkpoints"):
-        rows = compute_one_checkpoint(
-            ckpt_file, args.tokenizer_dir, csv_rows, args.max_seq_length, args.batch_size
-        )
+    for ckpt_dir in tqdm(ckpts, desc="checkpoints"):
+        rows = compute_one_checkpoint(ckpt_dir, tokenizer, csv_rows, args.batch_size)
         all_rows.extend(rows)
 
     all_rows.sort(key=lambda r: (r["step"], r["gap_verb"]))
