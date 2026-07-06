@@ -242,7 +242,6 @@ train_dataset = PackedStreamingDataset(
         args.svo_orc
     ]
 )
-train_dataset.num_shards = 4
 c4_val_truncated = c4_val_ds.take(10000)
 
 validation_dataset = PackedStreamingDataset(
@@ -252,7 +251,6 @@ validation_dataset = PackedStreamingDataset(
     sources=[c4_val_truncated],
     probabilities=[1.0]
 )
-validation_dataset.num_shards = 4
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
                                        local_files_only=True,
