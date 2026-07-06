@@ -12,9 +12,7 @@ import statsmodels.formula.api as smf
 import torch
 from tqdm import tqdm
 
-from litgpt import Tokenizer
-
-from utils import load_checkpoint, resolve_checkpoint_file, step_from_checkpoint
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 def compute_gap_surprisals_batch(
@@ -32,8 +30,8 @@ def compute_gap_surprisals_batch(
 
         encoded = []
         for pre_gap, post_gap in batch:
-            context_ids = tokenizer.encode(pre_gap, bos=False, eos=False).tolist()
-            suffix_ids  = tokenizer.encode(" " + post_gap, bos=False, eos=False).tolist()
+            context_ids = tokenizer.encode(pre_gap, add_special_tokens=False)
+            suffix_ids  = tokenizer.encode(" " + post_gap, add_special_tokens=False)
             encoded.append((context_ids, suffix_ids))
 
         max_len = max(len(c) + len(s) for c, s in encoded)
@@ -46,7 +44,7 @@ def compute_gap_surprisals_batch(
         x = torch.tensor(padded, device=device)  # (B, max_len)
 
         with torch.no_grad():
-            logits = model(x)  # (B, max_len, vocab)
+            logits = model(input_ids=x).logits  # (B, max_len, vocab)
         log_probs = torch.log_softmax(logits, dim=-1)  # (B, max_len, vocab)
 
         for i, (context_ids, suffix_ids) in enumerate(encoded):
@@ -171,13 +169,17 @@ def _run_lme_one_step(step, df, surprisal_col="surprisal_first"):
         "ml_interaction_ci_high":  ml_int_mean + t_crit * ml_int_se,
     }
     
-def run_checkpoint(ckpt_file: Path, tokenizer: Tokenizer, rows: List[dict],
-                   max_seq_length: int, device: torch.device,
+def run_checkpoint(ckpt_dir: Path, tokenizer, rows: List[dict],
+                   device: torch.device,
                    batch_size: int = 32) -> Tuple[List[dict], List[dict]]:
     """Returns (surprisal_rows, lme_rows)."""
-    step = step_from_checkpoint(ckpt_file)
-    print(f"\n=== step {step} ===")
-    model = load_checkpoint(ckpt_file, device, max_seq_length)
+    name = ckpt_dir.name
+    step = int(name.split("-")[-1]) if "-" in name else 0
+    print(f"\n=== {name} (step {step}) ===")
+    model = AutoModelForCausalLM.from_pretrained(
+        ckpt_dir, local_files_only=True
+    ).to(device)
+    model.eval()
 
     # Resolve post_gap for rows where it's empty (wh +gap: derive from sentence)
     items = []
@@ -232,11 +234,11 @@ def main() -> None:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--checkpoint", type=Path)
     g.add_argument("--checkpoint-dir", type=Path)
-    p.add_argument("--tokenizer-dir", type=Path, default=Path("checkpoints/gpt2"))
+    p.add_argument("--tokenizer-dir", type=Path, default=None,
+                   help="HF tokenizer directory. Defaults to --checkpoint or --checkpoint-dir.")
     p.add_argument("--input-csv", type=Path, required=True,
                    help="filler_gap_factorial.csv or wh_movement_factorial.csv")
     p.add_argument("--output-csv", type=Path, required=True)
-    p.add_argument("--max-seq-length", type=int, default=0)
     p.add_argument("--batch-size", type=int, default=32)
     args = p.parse_args()
 
@@ -246,22 +248,24 @@ def main() -> None:
     input_fields = list(rows[0].keys())
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = Tokenizer(args.tokenizer_dir)
+    tok_path = args.tokenizer_dir or args.checkpoint or args.checkpoint_dir
+    tokenizer = AutoTokenizer.from_pretrained(tok_path, local_files_only=True)
 
     if args.checkpoint is not None:
-        ckpts = [resolve_checkpoint_file(args.checkpoint)]
+        ckpts = [args.checkpoint]
     else:
         ckpts = sorted(
-            args.checkpoint_dir.glob("step-*/lit_model.pth"),
-            key=lambda x: int(x.parent.name.split("-")[1]),
+            [d for d in args.checkpoint_dir.iterdir()
+             if d.is_dir() and d.name.startswith("checkpoint-")],
+            key=lambda d: int(d.name.split("-")[-1]),
         )
         if not ckpts:
-            raise FileNotFoundError(f"No step checkpoints found in {args.checkpoint_dir}")
+            raise FileNotFoundError(f"No checkpoint-* directories found in {args.checkpoint_dir}")
 
     all_results = []
     all_lme_rows = []
     for ckpt_file in ckpts:
-        surprisal_rows, lme_rows = run_checkpoint(ckpt_file, tokenizer, rows, args.max_seq_length, device, args.batch_size)
+        surprisal_rows, lme_rows = run_checkpoint(ckpt_file, tokenizer, rows, device, args.batch_size)
         all_results.extend(surprisal_rows)
         all_lme_rows.extend(lme_rows)
 
