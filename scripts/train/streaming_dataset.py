@@ -242,6 +242,7 @@ train_dataset = PackedStreamingDataset(
         args.svo_orc
     ]
 )
+train_dataset.num_shards = 4
 c4_val_truncated = c4_val_ds.take(10000)
 
 validation_dataset = PackedStreamingDataset(
@@ -251,6 +252,7 @@ validation_dataset = PackedStreamingDataset(
     sources=[c4_val_truncated],
     probabilities=[1.0]
 )
+validation_dataset.num_shards = 4
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
                                        local_files_only=True,
@@ -278,7 +280,8 @@ training_args = TrainingArguments(
     adam_beta2=config.get("adam_beta2", 0.95),
     logging_steps=config.get("logging_steps", 50),
     max_grad_norm=config.get("max_grad_norm", 1),
-    dataloader_num_workers=config.get("dataloader_num_workers", 4),
+    dataloader_num_workers=4,
+    dataloader_persistent_workers=True,
     dataloader_prefetch_factor=config.get("dataloader_prefetch_factor", 2),
     dataloader_pin_memory=True,
     remove_unused_columns=False,
