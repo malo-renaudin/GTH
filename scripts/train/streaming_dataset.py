@@ -1,5 +1,5 @@
 import random
-from datasets import load_dataset, interleave_datasets, IterableDataset, load_from_disk
+from datasets import load_dataset, interleave_datasets, IterableDataset, load_from_disk, concatenate_datasets
 from transformers import (
     AutoTokenizer,
     AutoConfig,
@@ -28,6 +28,9 @@ argument_parser.add_argument("--wh", type=float, default=0)
 argument_parser.add_argument("--svo_wh", type=float, default=0.05)
 argument_parser.add_argument("--svo_orc", type=float, default=0.05)
 args = argument_parser.parse_args()
+
+config = yaml.safe_load(open(args.config))
+_n_workers = config.get("dataloader_num_workers", 4)
 
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
@@ -70,23 +73,19 @@ c4_val = IterableDataset.from_generator(
 c4_sent.is_generator_sharded = True
 c4_val.is_generator_sharded = True
 
-# Wrap text-file streaming sources so each call creates a fresh streaming dataset
-orc_ds = IterableDataset.from_generator(
-    lambda: iter(load_dataset("text", data_files="data/orc7.txt", split="train", streaming=True)),
-    features=None,
-)
-wh_ds = IterableDataset.from_generator(
-    lambda: iter(load_dataset("text", data_files="data/wh5.txt", split="train", streaming=True)),
-    features=None,
-)
-svo_wh_ds = IterableDataset.from_generator(
-    lambda: iter(load_dataset("text", data_files="data/declaratives_from_wh5.txt", split="train", streaming=True)),
-    features=None,
-)
-svo_orc_ds = IterableDataset.from_generator(
-    lambda: iter(load_dataset("text", data_files="data/declaratives_from_orc7.txt", split="train", streaming=True)),
-    features=None,
-)
+# Text-file sources: _n_workers independent repeating copies concatenated so
+# n_shards = _n_workers. HF will not kill DataLoader workers and each worker
+# gets one full copy of the file — correct probabilities across all workers.
+def _text_source(filepath):
+    return concatenate_datasets([
+        load_dataset("text", data_files=filepath, split="train", streaming=True).repeat()
+        for _ in range(_n_workers)
+    ])
+
+orc_ds    = _text_source("data/orc7.txt")
+wh_ds     = _text_source("data/wh5.txt")
+svo_wh_ds  = _text_source("data/declaratives_from_wh5.txt")
+svo_orc_ds = _text_source("data/declaratives_from_orc7.txt")
 
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2", local_files_only=True, use_fast=True)
@@ -161,6 +160,7 @@ class PackedStreamingDataset(IterableDataset):
             # chunk is built from a single dataset. Chunks are interleaved at
             # the batch level via probabilistic source selection.
             buffers      = [[] for _ in sharded]
+            text_buffers = [[] for _ in sharded]
             src_iters    = [iter(src) for src in sharded]
             total_p      = sum(probs)
             weights      = [p / total_p for p in probs]
@@ -176,14 +176,16 @@ class PackedStreamingDataset(IterableDataset):
                     src_iters[idx] = iter(sharded[idx])
                     continue
 
-                # Tokenize after each document so the inner chunk-flush loop
-                # yields at most one chunk per outer iteration, keeping
-                # chunk-level interleaving fine-grained.
-                enc = self.tokenizer(
-                    [example["text"].strip() + self.tokenizer.eos_token],
-                    add_special_tokens=False
-                )["input_ids"]
-                buffers[idx].extend(enc[0])
+                text_buffers[idx].append(example["text"].strip())
+
+                if len(text_buffers[idx]) >= self.batch_text_size:
+                    enc = self.tokenizer(
+                        [t + self.tokenizer.eos_token for t in text_buffers[idx]],
+                        add_special_tokens=False
+                    )["input_ids"]
+                    for ids in enc:
+                        buffers[idx].extend(ids)
+                    text_buffers[idx] = []
 
                 while len(buffers[idx]) >= self.block_size:
                     chunk = torch.tensor(buffers[idx][:self.block_size], dtype=torch.long)
@@ -247,14 +249,12 @@ validation_dataset = PackedStreamingDataset(
     block_size=1024
 )
 
-config = yaml.safe_load(open(args.config))
-
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
                                        local_files_only=True,
                                        attn_implementation="sdpa")
 model = AutoModelForCausalLM.from_config(hf_config)
-
+model = torch.compile(model)
 # model.gradient_checkpointing_enable()
 model.config.use_cache = False
 
