@@ -6,18 +6,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--output_file", type=str, default="generate_simple_datasets/generated_simple_datasets/filler_gap_factorial.csv")
 args = parser.parse_args()
 
-nouns1        = ["boy", "student", "doctor", "artist", "athlete"]
-nouns2        = ["girl", "child", "pilot", "scientist", "engineer"]
+nouns1        = ["boy", "student", "doctor", "artist", "nurse"]    # replaced: athlete → nurse
+nouns2        = ["girl", "child", "pilot", "guard", "judge"]        # replaced: scientist → guard, engineer → judge
 continuations = ["is happy", "is tired", "is sleeping", "is smart", "is tall"]
 matrix_verbs  = ["He knows", "She says", "They think", "We believe"]
 
-# Only semantically compatible verb-object pairs
+# Only semantically compatible verb-object pairs — single GPT2 tokens only
 VERB_OBJECTS = {
-    "likes":   ["football", "music", "painting", "cooking", "reading"],
-    "visits":  ["museums", "galleries", "parks", "libraries", "zoos"],
-    "helps":   ["friends", "neighbors", "colleagues", "strangers", "classmates"],
-    "avoids":  ["football", "crowds", "noise", "trouble", "conflict"],
-    "follows": ["rules", "instructions", "advice", "trends", "directions"],
+    "likes":   ["music", "painting", "cooking", "reading", "golf"],          # replaced: football → golf
+    "visits":  ["parks", "bars", "towns", "farms", "shops"],                 # replaced: museums, galleries, libraries, zoos
+    "helps":   ["friends", "staff", "kids", "fans", "guests"],               # replaced: neighbors, colleagues, strangers, classmates
+    "avoids":  ["crowds", "noise", "trouble", "conflict", "stress"],         # replaced: football → stress
+    "follows": ["rules", "advice", "trends", "laws", "codes"],               # replaced: instructions, directions
 }
 
 rows = []
