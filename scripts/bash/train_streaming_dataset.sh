@@ -9,10 +9,10 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=20:00:00
-#SBATCH --error=results/good_training/error_train_streaming%a.log
-#SBATCH --output=results/good_training/output_train_streaming_%a.log
+#SBATCH --error=results/final_training_test_hopefully_3/error_train_streaming%a.log
+#SBATCH --output=results/final_training_test_hopefully_3/output_train_streaming_%a.log
 
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
-python scripts/train/streaming_dataset.py --output-dir results/good_training
+python scripts/train/streaming_dataset.py   --output-dir results/final_training_test_hopefully_3   --probability-masses-orc eval_data/orc_test.txt   --probability-masses-wh  eval_data/wh_test.txt   --blimp-dir eval_data/blimp_data   --nested-inner eval_data/short_nested_inner_english.json   --nested-outer eval_data/short_nested_outer_english.json   --filler-gap-orc eval_data/filler_gap_orc.csv   --filler-gap-wh eval_data/filler_gap_wh.csv
