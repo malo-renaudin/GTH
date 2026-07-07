@@ -31,7 +31,6 @@ def run(ckpt_dir: str, eval_dataset_path: str, out_metrics_path: str) -> dict:
     model.eval()
     with torch.no_grad():
         for ex in test:
-            print(ex["input"])
             inputs       = tokenizer(ex["input"], return_tensors="pt").to(device)
             all_word_ids = {word: _best_ids(word) for word in ex["target_scores"]}
 

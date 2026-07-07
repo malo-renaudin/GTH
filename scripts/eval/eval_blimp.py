@@ -123,7 +123,7 @@ def evaluate_checkpoint(
     pair_rows: List[dict] = []
     paradigm_rows: List[dict] = []
 
-    for par in tqdm(paradigms, desc="  paradigms", leave=False):
+    for par in paradigms:
         uid = par["uid"]
         field = par["field"]
         linguistics_term = par["linguistics_term"]
@@ -188,7 +188,7 @@ def load_paradigms(blimp_dir: Path, tokenizer) -> List[dict]:
 
     paradigms = []
     print(f"Loading {len(jsonl_files)} BLiMP paradigm(s) from {blimp_dir} ...")
-    for jf in tqdm(jsonl_files, desc="Tokenizing"):
+    for jf in jsonl_files:
         pairs = []
         uid = field = linguistics_term = None
         with open(jf, encoding="utf-8") as f:
