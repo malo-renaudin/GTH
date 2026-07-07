@@ -196,8 +196,6 @@ hf_config = AutoConfig.from_pretrained(args.model_name,
                                        local_files_only=True,
                                        attn_implementation="sdpa")
 model = AutoModelForCausalLM.from_config(hf_config)
-model = torch.compile(model)
-# model.gradient_checkpointing_enable()
 model.config.use_cache = False
 
 training_args = TrainingArguments(
@@ -221,7 +219,8 @@ training_args = TrainingArguments(
     dataloader_pin_memory=True,
     remove_unused_columns=False,
     gradient_accumulation_steps=config.get("gradient_accumulation_steps", 1),
-    bf16=True, 
+    bf16=True,
+    torch_compile=True,
     optim="adamw_torch_fused",
 
 
