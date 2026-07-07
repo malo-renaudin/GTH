@@ -115,9 +115,27 @@ def evaluate(ckpt_dir: Path, tokenizer, paradigms, results_dir: Path,
     """Run all evaluations for a checkpoint. Add new eval calls here."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     results_dir.mkdir(parents=True, exist_ok=True)
+    # Load model once if any eval needs it
+    need_model = any([
+        paradigms is not None,
+        nested_inner is not None,
+        nested_outer is not None,
+        filler_gap_orc is not None,
+        filler_gap_wh is not None,
+        probability_masses_orc is not None,
+        probability_masses_wh is not None,
+    ])
+
+    model = None
+    loaded_model_here = False
+    if need_model:
+        model = AutoModelForCausalLM.from_pretrained(ckpt_dir, local_files_only=True).to(device)
+        model.config.use_cache = True
+        model.eval()
+        loaded_model_here = True
 
     if paradigms is not None:
-        _, paradigm_rows = eval_blimp.evaluate_checkpoint(ckpt_dir, tokenizer, paradigms, device)
+        _, paradigm_rows = eval_blimp.evaluate_checkpoint(ckpt_dir, tokenizer, paradigms, device, model=model)
         fields = ["step", "uid", "field", "linguistics_term", "n_pairs", "n_correct", "accuracy"]
         with open(results_dir / "blimp.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fields)
@@ -128,22 +146,20 @@ def evaluate(ckpt_dir: Path, tokenizer, paradigms, results_dir: Path,
         print(f"  BLiMP accuracy: {total_ok / total_n:.4f}" if total_n else "  BLiMP: no pairs")
 
     if nested_inner is not None:
-        eval_nested.run(str(ckpt_dir), str(nested_inner),  str(results_dir / "nested_inner.json"))
+        eval_nested.run(str(ckpt_dir), str(nested_inner),  str(results_dir / "nested_inner.json"), model=model)
 
     if nested_outer is not None:
-        eval_nested.run(str(ckpt_dir), str(nested_outer),  str(results_dir / "nested_outer.json"))
-    
+        eval_nested.run(str(ckpt_dir), str(nested_outer),  str(results_dir / "nested_outer.json"), model=model)
+
     if filler_gap_orc is not None:
-        eval_filler_gap.run(str(ckpt_dir), str(filler_gap_orc), str(results_dir / "filler_gap_orc.csv"))
+        eval_filler_gap.run(str(ckpt_dir), str(filler_gap_orc), str(results_dir / "filler_gap_orc.csv"), batch_size=32, model=model)
 
     if filler_gap_wh is not None:
-        eval_filler_gap.run(str(ckpt_dir), str(filler_gap_wh),  str(results_dir / "filler_gap_wh.csv"))
+        eval_filler_gap.run(str(ckpt_dir), str(filler_gap_wh),  str(results_dir / "filler_gap_wh.csv"), batch_size=32, model=model)
 
-    # Probability masses: load model once and evaluate ORC/WH probability masses
+    # Probability masses: evaluate using the same loaded model
     if probability_masses_orc is not None or probability_masses_wh is not None:
         print("  Running probability-masses evaluation...")
-        model = AutoModelForCausalLM.from_pretrained(ckpt_dir, local_files_only=True).to(device)
-        model.eval()
         vocab = eval_probability_masses.build_vocabulary()
 
         if probability_masses_orc is not None:
@@ -158,6 +174,7 @@ def evaluate(ckpt_dir: Path, tokenizer, paradigms, results_dir: Path,
                 json.dump(pm_wh, f)
             print(f"  Probability masses (WH): {pm_wh}")
 
+    if loaded_model_here:
         del model
         if device.type == "cuda":
             torch.cuda.empty_cache()

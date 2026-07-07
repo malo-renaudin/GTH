@@ -171,15 +171,19 @@ def _run_lme_one_step(step, df, surprisal_col="surprisal_first"):
     
 def run_checkpoint(ckpt_dir: Path, tokenizer, rows: List[dict],
                    device: torch.device,
-                   batch_size: int = 32) -> Tuple[List[dict], List[dict]]:
+                   batch_size: int = 32,
+                   model=None) -> Tuple[List[dict], List[dict]]:
     """Returns (surprisal_rows, lme_rows)."""
     name = ckpt_dir.name
     step = int(name.split("-")[-1]) if "-" in name else 0
     print(f"\n=== {name} (step {step}) ===")
-    model = AutoModelForCausalLM.from_pretrained(
-        ckpt_dir, local_files_only=True
-    ).to(device)
-    model.eval()
+    loaded_here = False
+    if model is None:
+        model = AutoModelForCausalLM.from_pretrained(
+            ckpt_dir, local_files_only=True
+        ).to(device)
+        model.eval()
+        loaded_here = True
 
     # Resolve post_gap for rows where it's empty (wh +gap: derive from sentence)
     items = []
@@ -202,9 +206,10 @@ def run_checkpoint(ckpt_dir: Path, tokenizer, rows: List[dict],
         for row, (s_first, s_mean) in zip(rows, surprisals)
     ]
 
-    del model
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    if loaded_here:
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     print_metrics(results, "surprisal_first", "surprisal_first")
     print_metrics(results, "surprisal_mean",  "surprisal_mean")
@@ -296,14 +301,15 @@ if __name__ == "__main__":
     main()
 
 
-def run(ckpt_dir: str, csv_path: str, out_csv_path: str, batch_size: int = 32) -> None:
+def run(ckpt_dir: str, csv_path: str, out_csv_path: str, batch_size: int = 32, model=None, tokenizer=None) -> None:
     """Callable entry-point used by the training callback."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir, local_files_only=True)
+    if tokenizer is None:
+        tokenizer = AutoTokenizer.from_pretrained(ckpt_dir, local_files_only=True)
     with open(csv_path, newline="") as f:
         rows = list(csv.DictReader(f))
     input_fields = list(rows[0].keys())
-    surprisal_rows, lme_rows = run_checkpoint(Path(ckpt_dir), tokenizer, rows, device, batch_size)
+    surprisal_rows, lme_rows = run_checkpoint(Path(ckpt_dir), tokenizer, rows, device, batch_size, model=model)
 
     out = Path(out_csv_path)
     out.parent.mkdir(parents=True, exist_ok=True)

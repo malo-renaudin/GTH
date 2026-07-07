@@ -7,13 +7,17 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-def run(ckpt_dir: str, eval_dataset_path: str, out_metrics_path: str) -> dict:
+def run(ckpt_dir: str, eval_dataset_path: str, out_metrics_path: str, model=None, tokenizer=None) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir, local_files_only=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        ckpt_dir, local_files_only=True
-    ).to(device)
+    loaded_here = False
+    if tokenizer is None:
+        tokenizer = AutoTokenizer.from_pretrained(ckpt_dir, local_files_only=True)
+    if model is None:
+        model = AutoModelForCausalLM.from_pretrained(
+            ckpt_dir, local_files_only=True
+        ).to(device)
+        loaded_here = True
 
     with open(eval_dataset_path) as f:
         test = json.load(f)["examples"]
@@ -76,9 +80,10 @@ def run(ckpt_dir: str, eval_dataset_path: str, out_metrics_path: str) -> dict:
         with open(out_metrics_path, "w") as f:
             json.dump(eval_metrics, f, indent=2)
 
-    del model
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    if loaded_here:
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     return eval_metrics
 

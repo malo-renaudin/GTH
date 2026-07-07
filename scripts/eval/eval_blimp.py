@@ -110,15 +110,19 @@ def evaluate_checkpoint(
     paradigms: List[dict],
     device: torch.device,
     batch_size: int = 32,
+    model=None,
 ) -> Tuple[List[dict], List[dict]]:
     """Return (pair_rows, paradigm_rows) for one checkpoint."""
     name = ckpt_dir.name
     step = int(name.split("-")[-1]) if "-" in name else 0
     print(f"\n=== {name} (step {step}) ===")
-    model = AutoModelForCausalLM.from_pretrained(
-        ckpt_dir, local_files_only=True
-    ).to(device)
-    model.eval()
+    loaded_here = False
+    if model is None:
+        model = AutoModelForCausalLM.from_pretrained(
+            ckpt_dir, local_files_only=True
+        ).to(device)
+        model.eval()
+        loaded_here = True
 
     pair_rows: List[dict] = []
     paradigm_rows: List[dict] = []
@@ -169,9 +173,10 @@ def evaluate_checkpoint(
     overall_acc = total_correct / total_n if total_n > 0 else float("nan")
     print(f"\n  Overall accuracy: {overall_acc:.4f}  ({total_correct}/{total_n})")
 
-    del model
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    if loaded_here:
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     return pair_rows, paradigm_rows
 
