@@ -44,15 +44,15 @@ from typing import List
 # Vocabulary
 # ---------------------------------------------------------------------------
 
-ANIMATE_N1 = ["boy", "girl", "student", "doctor", "artist", "athlete", "pilot", "officer"]
-ANIMATE_N2 = ["girl", "boy", "child", "scientist", "engineer", "patient", "client", "tourist"]
+ANIMATE_N1 = ["boy", "girl", "student", "doctor", "artist", "nurse", "pilot", "officer"]  # replaced: athlete → nurse
+ANIMATE_N2 = ["girl", "boy", "child", "guard", "judge", "patient", "client", "tourist"]  # replaced: scientist → guard, engineer → judge
 
 # Transitive verbs: clearly take a direct object (gap-licensing).
 TRANSITIVE_VERBS = ["sees", "knows", "likes", "helps", "follows", "watches", "visits", "calls"]
 
 # Intransitive verbs: cannot take a direct object (no gap licensing).
 # Excluded ambitransitives: runs (runs a company), walks (walks the dog).
-INTRANSITIVE_VERBS = ["sleeps", "laughs", "cries", "sneezes", "yawns", "sits", "waits", "smiles"]
+INTRANSITIVE_VERBS = ["sleeps", "laughs", "cries", "smiles", "yawns", "sits", "waits", "nods"]  # replaced: sneezes → nods
 
 RELATIVIZERS = ["that", "who", ""]  # animate N1: overt relativizer or zero
 

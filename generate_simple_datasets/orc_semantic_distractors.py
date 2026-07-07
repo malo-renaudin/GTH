@@ -48,22 +48,22 @@ from typing import Dict, List, Tuple
 
 # Animate nouns used as N1 (filler) in condition 1, and as N2 (embedded subj)
 # in both conditions.
-ANIMATE_N1 = ["boy", "girl", "student", "doctor", "artist", "athlete", "pilot", "officer"]
-ANIMATE_N2 = ["girl", "boy", "child", "scientist", "engineer", "patient", "client", "tourist"]
+ANIMATE_N1 = ["boy", "girl", "student", "doctor", "artist", "nurse", "pilot", "officer"]  # replaced: athlete → nurse
+ANIMATE_N2 = ["girl", "boy", "child", "guard", "judge", "patient", "client", "tourist"]  # replaced: scientist → guard, engineer → judge
 
 # Inanimate nouns used as N1 (filler) in condition 2.
-INANIMATE_N1 = ["car", "house", "book", "phone", "computer", "table", "door", "ball",
-                "stone", "bridge", "train", "cup"]
+INANIMATE_N1 = ["car", "house", "book", "phone", "table", "door", "ball",
+                "stone", "bridge", "train", "cup", "bag"]  # replaced: computer → bag
 
 # Verbs that strongly select INANIMATE objects only.
 # Excluded: uses (general), finds (general), touches (general), holds (can hold
 # people), carries (can carry people), buys (can hire), paints (portraits), cleans.
 INANIMATE_VERBS: Dict[str, List[str]] = {
-    "eats":   ["pizza", "cake", "bread", "apple", "cookie"],
-    "reads":  ["book", "newspaper", "letter", "magazine"],
+    "eats":   ["pizza", "cake", "bread", "apple", "soup"],       # replaced: cookie → soup
+    "reads":  ["book", "paper", "letter", "mail"],               # replaced: newspaper → paper, magazine → mail
     "builds": ["house", "bridge", "table", "door", "wall"],
     "drives": ["car", "truck", "bus", "train"],
-    "fixes":  ["car", "door", "phone", "computer"],
+    "fixes":  ["car", "door", "phone", "bike"],                  # replaced: computer → bike
     "opens":  ["door", "window", "bottle", "box"],
     "breaks": ["window", "door", "phone", "cup"],
     "lifts":  ["box", "stone", "bag", "table"],
@@ -72,14 +72,14 @@ INANIMATE_VERBS: Dict[str, List[str]] = {
 
 # Verbs that strongly select ANIMATE objects only.
 ANIMATE_VERBS: Dict[str, List[str]] = {
-    "interviews": ["doctor", "student", "pilot", "officer", "scientist"],
-    "hires":      ["doctor", "engineer", "pilot", "officer", "scientist"],
-    "meets":      ["doctor", "student", "pilot", "officer", "engineer"],
-    "trusts":     ["doctor", "student", "pilot", "officer", "engineer"],
-    "teaches":    ["student", "child", "engineer", "scientist", "artist"],
-    "greets":     ["doctor", "student", "pilot", "officer", "tourist"],
-    "thanks":     ["doctor", "student", "pilot", "officer", "engineer"],
-    "advises":    ["doctor", "student", "engineer", "scientist", "officer"],
+    "hires":  ["doctor", "nurse", "pilot", "officer", "guard"],    # replaced: interviews/advises (multi-token verbs); scientist/engineer → nurse/guard
+    "meets":  ["doctor", "student", "pilot", "officer", "judge"],  # replaced: engineer → judge
+    "trusts": ["doctor", "student", "pilot", "officer", "judge"],  # replaced: engineer → judge
+    "greets": ["doctor", "student", "pilot", "officer", "tourist"],
+    "thanks": ["doctor", "student", "pilot", "officer", "nurse"],  # replaced: engineer → nurse
+    "helps":  ["doctor", "student", "pilot", "officer", "guard"],  # replaced: interviews → helps; scientist/engineer → officer/guard
+    "calls":  ["doctor", "student", "pilot", "officer", "nurse"],  # replaced: advises → calls
+    "knows":  ["doctor", "student", "pilot", "officer", "guard"],  # replaced: teaches → knows
 }
 
 RELATIVIZERS_ANIMATE   = ["that", "who"]
