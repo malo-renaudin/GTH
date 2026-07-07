@@ -255,7 +255,7 @@ callbacks.append(LogScaleCallback(
     filler_gap_wh        = args.filler_gap_wh,
     transitivity_orc     = args.transitivity_orc,
     semantic_distractor  = args.semantic_distractor,
-    eval_results_dir     = args.eval_results_dir,
+    eval_results_dir     = args.eval_results_dir or args.output_dir,
 ))
 
 trainer = Trainer(
