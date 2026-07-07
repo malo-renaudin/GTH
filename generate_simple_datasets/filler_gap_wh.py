@@ -7,18 +7,24 @@ parser.add_argument("--output_file", type=str, default="generate_simple_datasets
 args = parser.parse_args()
 
 nouns        = ["boy", "student", "doctor", "artist", "nurse",
-                "girl", "pilot", "guard", "judge", "teacher"]  # replaced: athlete → nurse, scientist → guard, engineer → judge
-verbs_ing    = ["writing", "reading", "singing", "drawing", "painting"]
+                "girl", "pilot", "guard", "judge", "teacher"]
+verbs_ing    = ["writing", "reading", "singing", "drawing", "painting",
+                "cooking", "playing", "making", "cleaning", "watching"]  # added 5 more verbs
 wh_words     = ["What"]                                                  # +filler
-no_fillers   = ["This", "That", "It"]                                   # -filler
+no_fillers   = ["This", "That", "It", "He", "She"]                      # expanded: +He, +She
 
 # Only semantically compatible verb-object pairs — single GPT2 tokens only
 VERB_OBJECTS = {
     "writing":  ["a song", "a book", "a poem", "a letter", "a story"],
-    "reading":  ["a book", "a poem", "a letter", "a story"],
-    "singing":  ["a song", "a melody", "a chant"],                   # replaced: lullaby → chant
-    "drawing":  ["a portrait", "a map", "a sketch"],
-    "painting": ["a portrait", "a mural", "a scene"],               # replaced: landscape → scene
+    "reading":  ["a book", "a poem", "a letter", "a story", "a note"],   # added: note
+    "singing":  ["a song", "a melody", "a chant", "a tune", "a hymn"],  # added: tune, hymn
+    "drawing":  ["a portrait", "a map", "a sketch", "a face", "a chart"],# added: face, chart
+    "painting": ["a portrait", "a mural", "a scene", "a wall", "a room"],# added: wall, room
+    "cooking":  ["a meal", "a soup", "a cake", "a stew", "a sauce"],
+    "playing":  ["a song", "a tune", "a game", "a role", "a trick"],
+    "making":   ["a film", "a cake", "a speech", "a deal", "a list"],
+    "cleaning": ["a room", "a car", "a desk", "a wall", "a floor"],
+    "watching": ["a film", "a game", "a show", "a bird", "a match"],
 }
 
 rows = []
