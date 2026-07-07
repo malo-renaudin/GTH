@@ -15,4 +15,4 @@
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
-python scripts/train/streaming_dataset.py   --output-dir results/final_training_test_hopefully_3   --probability-masses-orc eval_data/orc_test.txt   --probability-masses-wh  eval_data/wh_test.txt   --blimp-dir eval_data/blimp_data   --nested-inner eval_data/short_nested_inner_english.json   --nested-outer eval_data/short_nested_outer_english.json   --filler-gap-orc eval_data/filler_gap_orc.csv   --filler-gap-wh eval_data/filler_gap_wh.csv
+python scripts/train/streaming_dataset.py   --output-dir results/baseline_with_dense_window   --probability-masses-orc eval_data/orc_test.txt   --probability-masses-wh  eval_data/wh_test.txt   --blimp-dir eval_data/blimp_data   --nested-inner eval_data/short_nested_inner_english.json   --nested-outer eval_data/short_nested_outer_english.json   --filler-gap-orc eval_data/filler_gap_orc.csv   --filler-gap-wh eval_data/filler_gap_wh.csv
