@@ -2,8 +2,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
 model_path = "gpt2"  # or the full snapshot folder path from above
-tok = AutoTokenizer.from_pretrained(model_path, cache_dir="train/.cache", local_files_only=True)
-model = AutoModelForCausalLM.from_pretrained(model_path, cache_dir="train/.cache", local_files_only=True)
+tok = AutoTokenizer.from_pretrained(model_path, cache_dir="scripts/train/.cache", local_files_only=True)
+model = AutoModelForCausalLM.from_pretrained(model_path, cache_dir="scripts/train/.cache", local_files_only=True)
 model.eval()
 model.config.use_cache = True
 
