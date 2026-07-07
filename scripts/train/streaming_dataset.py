@@ -32,6 +32,7 @@ argument_parser.add_argument("--log-scale-start-step", type=int, default=10)
 argument_parser.add_argument("--blimp-dir",            type=str, default="blimp_data")
 argument_parser.add_argument("--nested-eval-dataset",  type=str, default="short_nested_inner_english.json")
 argument_parser.add_argument("--eval-results-dir",     type=str, default="result/good_training_test")
+argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
 
 config = yaml.safe_load(open(args.config))
@@ -102,6 +103,7 @@ class PackedStreamingDataset(TorchIterableDataset):
         block_size: int = 1024,
         batch_text_size: int = 512,
         seed: int = 42,
+        max_samples: int = 0,   # 0 = unlimited (use for validation to cap eval time)
     ):
         super().__init__()
         self.source_loaders  = source_loaders
@@ -110,12 +112,14 @@ class PackedStreamingDataset(TorchIterableDataset):
         self.block_size      = block_size
         self.batch_text_size = batch_text_size
         self.seed            = seed
+        self.max_samples     = max_samples
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
         worker_id = worker_info.id if worker_info is not None else 0
 
         rng = random.Random(self.seed + worker_id)
+        n_yielded = 0
 
         active = [(ld, p) for ld, p in zip(self.source_loaders, self.probabilities) if p > 0]
         loaders, probs = zip(*active)
@@ -151,8 +155,11 @@ class PackedStreamingDataset(TorchIterableDataset):
                 batch = []
 
             while len(buffer) >= self.block_size:
+                if self.max_samples and n_yielded >= self.max_samples:
+                    return
                 chunk = torch.tensor(buffer[:self.block_size], dtype=torch.long)
                 buffer = buffer[self.block_size:]
+                n_yielded += 1
 
                 yield {
                     "input_ids": chunk,
@@ -182,6 +189,7 @@ validation_dataset = PackedStreamingDataset(
     source_loaders=[_c4_val_loader],
     probabilities=[1.0],
     tokenizer=tokenizer,
+    max_samples=args.eval_max_samples,
 )
 hf_config = AutoConfig.from_pretrained(args.model_name, 
                                        cache_dir= args.cache_dir, 
