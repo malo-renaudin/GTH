@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import mock_open, patch
 
 from transformers import AutoTokenizer
 
@@ -49,11 +50,13 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True, use_fast=True)
 
-    # Load the generation script; patch argv so argparse uses its defaults
+    # Load the generation script; patch argv so argparse uses its defaults,
+    # and mock open() so file-writing at module level is silently ignored.
     sys.argv = [str(args.script)]
     spec = importlib.util.spec_from_file_location("_vocab_mod", args.script)
     mod  = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    with patch("builtins.open", mock_open()):
+        spec.loader.exec_module(mod)
 
     print(f"\nTokenizer : {args.tokenizer}")
     print(f"Script    : {args.script.name}\n")
