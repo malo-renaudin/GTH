@@ -34,23 +34,6 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-def _np_chain_prob(
-    model, x_ctx: torch.Tensor, ids: List[int],
-    device: torch.device, first_step_probs=None,
-) -> float:
-    """Product of P(t_i | ctx, t_0..t_{i-1}) for each token id in ids."""
-    prob = 1.0
-    cur  = x_ctx.clone()
-    for i, tid in enumerate(ids):
-        if i == 0 and first_step_probs is not None:
-            p = first_step_probs[tid].item()
-        else:
-            with torch.no_grad():
-                p = torch.softmax(model(input_ids=cur).logits[0, -1], dim=-1)[tid].item()
-        prob *= p
-        cur = torch.cat([cur, torch.tensor([[tid]], device=device)], dim=1)
-    return prob
-
 CSV_FIELDS = [
     "step", "structure", "gap_verb",
     "moved_np", "moved_np_animacy",
@@ -74,23 +57,33 @@ def compute_one_checkpoint(
     model  = AutoModelForCausalLM.from_pretrained(ckpt_dir, local_files_only=True).to(device)
     model.eval()
 
-    # Pre-tokenize every row from the CSV
-    # Each item: (pre_gap_ids, moved_ids, distractor_ids_list, verb, moved_np_animacy)
-    items: List[Tuple[List[int], List[int], List[List[int]], str, str]] = []
+    # Pre-tokenize: single-token noun IDs for moved NP and distractors.
+    # P(noun | pre_gap_text) compared directly at the gap site.
+    items: List[Tuple[List[int], int, List[int], str, str]] = []
     skipped = 0
     for row in csv_rows:
         pre_gap_ids = tokenizer.encode(row["pre_gap_text"], add_special_tokens=False)
-        moved_ids   = tokenizer.encode(" " + row["moved_np"], add_special_tokens=False)
-        distractor_ids_list = [
-            tokenizer.encode(" " + obj.strip(), add_special_tokens=False)
+
+        moved_noun_id = tokenizer.encode(" " + row["moved_np"].split()[-1], add_special_tokens=False)
+        distractor_noun_ids = [
+            tokenizer.encode(" " + obj.strip().split()[-1], add_special_tokens=False)
             for obj in row["plausible_objects"].split("|")
             if obj.strip()
         ]
-        if not pre_gap_ids or not moved_ids or not distractor_ids_list:
+        # skip if any noun is multi-token
+        if (not pre_gap_ids or len(moved_noun_id) != 1
+                or any(len(d) != 1 for d in distractor_noun_ids)):
             skipped += 1
             continue
-        verb = row["pre_gap_text"].strip().split()[-1]  # last word of pre_gap_text
-        items.append((pre_gap_ids, moved_ids, distractor_ids_list, verb, row["moved_np_animacy"]))
+
+        verb = row["pre_gap_text"].strip().split()[-1]
+        items.append((
+            pre_gap_ids,
+            moved_noun_id[0],
+            [d[0] for d in distractor_noun_ids],
+            verb,
+            row["moved_np_animacy"],
+        ))
 
     if skipped:
         print(f"  [warn] {skipped} row(s) skipped (empty tokenisation)")
@@ -110,21 +103,12 @@ def compute_one_checkpoint(
         with torch.no_grad():
             logits_batch = model(input_ids=x_batch).logits
 
-        for i, (pre_gap_ids, moved_ids, distractor_ids_list, verb, animacy) in enumerate(batch):
-            sp    = torch.softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
-            x_ctx = torch.tensor(contexts[i], device=device).unsqueeze(0)
+        for i, (ctx_with_the, moved_noun_id, distractor_noun_ids, verb, animacy) in enumerate(batch):
+            sp = torch.softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
 
-            def geomean_prob(ids: List[int]) -> float:
-                if not ids:
-                    return float("nan")
-                prob = _np_chain_prob(model, x_ctx, ids, device, first_step_probs=sp)
-                return prob ** (1.0 / len(ids))
-
-            # --- Moved NP ---
-            moved_mass = geomean_prob(moved_ids)
-
-            # --- Semantic distractors (from CSV plausible_objects) ---
-            distractor_probs = [geomean_prob(ids) for ids in distractor_ids_list if ids]
+            # direct single-token lookups — P(noun | ctx + "the")
+            moved_mass       = sp[moved_noun_id].item()
+            distractor_probs = [sp[d].item() for d in distractor_noun_ids]
             if not distractor_probs:
                 continue
 
@@ -173,7 +157,7 @@ def compute_one_checkpoint(
             "distractor_mass_median": round(d_med, 6),
             "moved_minus_distractor": round(t_avg - d_avg, 6),
             "roi_count": n,
-            "checkpoint": str(ckpt_file),
+            "checkpoint": str(ckpt_dir),
         })
 
     # Aggregate "all verbs" row
@@ -199,7 +183,7 @@ def compute_one_checkpoint(
             "distractor_mass_median": round(d_med, 6),
             "moved_minus_distractor": round(t_avg - d_avg, 6),
             "roi_count": len(all_moved),
-            "checkpoint": str(ckpt_file),
+            "checkpoint": str(ckpt_dir),
         })
 
     return rows

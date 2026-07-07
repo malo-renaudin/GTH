@@ -37,23 +37,6 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-def _np_chain_prob(
-    model, x_ctx: torch.Tensor, ids: List[int],
-    device: torch.device, first_step_probs=None,
-) -> float:
-    """Product of P(t_i | ctx, t_0..t_{i-1}) for each token id in ids."""
-    prob = 1.0
-    cur  = x_ctx.clone()
-    for i, tid in enumerate(ids):
-        if i == 0 and first_step_probs is not None:
-            p = first_step_probs[tid].item()
-        else:
-            with torch.no_grad():
-                p = torch.softmax(model(input_ids=cur).logits[0, -1], dim=-1)[tid].item()
-        prob *= p
-        cur = torch.cat([cur, torch.tensor([[tid]], device=device)], dim=1)
-    return prob
-
 # ---------------------------------------------------------------------------
 # CSV schema
 # ---------------------------------------------------------------------------
@@ -83,42 +66,38 @@ def compute_one_checkpoint(
     model  = AutoModelForCausalLM.from_pretrained(ckpt_dir, local_files_only=True).to(device)
     model.eval()
 
-    items: List[Tuple[List[int], List[int], str, str]] = []
+    items: List[Tuple[List[int], int, str, str]] = []
     skipped = 0
     for row in csv_rows:
         pre_gap_ids = tokenizer.encode(row["pre_gap_text"], add_special_tokens=False)
-        moved_ids   = tokenizer.encode(" " + row["moved_np"], add_special_tokens=False)
-        if not pre_gap_ids or not moved_ids:
+        # moved_np is "the N1"; N1 is single-token so we take only the last token
+        noun_id = tokenizer.encode(" " + row["moved_np"].split()[-1], add_special_tokens=False)
+        if not pre_gap_ids or len(noun_id) != 1:
             skipped += 1
             continue
-        items.append((pre_gap_ids, moved_ids, row["verb"], row["verb_type"]))
+        items.append((pre_gap_ids, noun_id[0], row["verb"], row["verb_type"]))
 
     if skipped:
         print(f"  [warn] {skipped} row(s) skipped (empty tokenisation)")
 
-    # Accumulator: (verb, verb_type) → list of geomean values
+    # Accumulator: (verb, verb_type) → list of P(noun | ctx) values
     by_key: Dict[Tuple[str, str], List[float]] = {}
-
-    def geomean_prob(x_ctx: torch.Tensor, ids: List[int], sp: torch.Tensor) -> float:
-        prob = _np_chain_prob(model, x_ctx, ids, device, first_step_probs=sp)
-        return prob ** (1.0 / len(ids))
 
     for batch_start in tqdm(range(0, len(items), batch_size), desc="  batches", leave=False):
         batch = items[batch_start: batch_start + batch_size]
 
-        ctx_lists  = [it[0] for it in batch]
+        ctx_lists   = [it[0] for it in batch]
         ctx_lengths = [len(c) for c in ctx_lists]
-        max_ctx    = max(ctx_lengths)
-        x_batch    = torch.tensor(
+        max_ctx     = max(ctx_lengths)
+        x_batch     = torch.tensor(
             [c + [0] * (max_ctx - len(c)) for c in ctx_lists], device=device
         )
         with torch.no_grad():
             logits_batch = model(input_ids=x_batch).logits
 
-        for i, (pre_gap_ids, moved_ids, verb, verb_type) in enumerate(batch):
-            sp    = torch.softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
-            x_ctx = torch.tensor(ctx_lists[i], device=device).unsqueeze(0)
-            mass  = geomean_prob(x_ctx, moved_ids, sp)
+        for i, (pre_gap_ids, noun_id, verb, verb_type) in enumerate(batch):
+            sp   = torch.softmax(logits_batch[i, ctx_lengths[i] - 1, :], dim=-1)
+            mass = sp[noun_id].item()  # single-token: direct lookup
 
             key = (verb, verb_type)
             by_key.setdefault(key, []).append(mass)
@@ -156,7 +135,7 @@ def compute_one_checkpoint(
             "moved_np_mass_median":        round(med, 6),
             "roi_count":                   n,
             "transitive_minus_intransitive": "",
-            "checkpoint":                  str(ckpt_file),
+            "checkpoint":                  str(ckpt_dir),
         })
 
     # Per-condition aggregate rows (verb = "ALL")
@@ -176,7 +155,7 @@ def compute_one_checkpoint(
             "moved_np_mass_median":        round(med, 6),
             "roi_count":                   n,
             "transitive_minus_intransitive": "",
-            "checkpoint":                  str(ckpt_file),
+            "checkpoint":                  str(ckpt_dir),
         })
 
     # Overall aggregate row with the key comparison
@@ -201,7 +180,7 @@ def compute_one_checkpoint(
             "moved_np_mass_median":        round(med, 6),
             "roi_count":                   n,
             "transitive_minus_intransitive": diff,
-            "checkpoint":                  str(ckpt_file),
+            "checkpoint":                  str(ckpt_dir),
         })
 
     return rows
