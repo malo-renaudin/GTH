@@ -26,8 +26,12 @@ def extract_word(item: str) -> str:
 
 
 def check_category(label: str, words: list, tokenizer) -> tuple:
+    # skip multi-word phrases — they are intentionally not single tokens
+    single_words = [w for w in words if " " not in w]
+    if not single_words:
+        return [], []
     ok, bad = [], []
-    for w in words:
+    for w in single_words:
         bare = extract_word(w)
         ids  = tokenizer.encode(" " + bare, add_special_tokens=False)
         if len(ids) == 1:
