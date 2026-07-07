@@ -47,7 +47,7 @@ def main():
     p.add_argument("--tokenizer", type=str,  default="gpt2")
     args = p.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True, use_fast=True)
 
     # Load the generation script; patch argv so argparse uses its defaults
     sys.argv = [str(args.script)]
