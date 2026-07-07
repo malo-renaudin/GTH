@@ -37,7 +37,8 @@ argument_parser.add_argument("--filler-gap-orc",       type=str, default="eval_d
 argument_parser.add_argument("--filler-gap-wh",        type=str, default="eval_data/filler_gap_wh.csv")
 argument_parser.add_argument("--transitivity-orc",     type=str, default="eval_data/orc_transitivity.csv")
 argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractor.csv")
-argument_parser.add_argument("--eval-results-dir",     type=str, default=None)
+argument_parser.add_argument("--probability-masses-orc", type=str, default=None)
+argument_parser.add_argument("--probability-masses-wh",  type=str, default=None)
 argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
 
@@ -255,7 +256,8 @@ callbacks.append(LogScaleCallback(
     filler_gap_wh        = args.filler_gap_wh,
     transitivity_orc     = args.transitivity_orc,
     semantic_distractor  = args.semantic_distractor,
-    eval_results_dir     = args.eval_results_dir or args.output_dir,
+    probability_masses_orc = args.probability_masses_orc,
+    probability_masses_wh  = args.probability_masses_wh,
 ))
 
 trainer = Trainer(

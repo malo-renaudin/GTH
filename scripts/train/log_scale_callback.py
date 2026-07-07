@@ -180,14 +180,12 @@ class LogScaleCallback(TrainerCallback):
                  nested_inner=None, nested_outer=None, locality=None,
                  filler_gap_orc=None, filler_gap_wh=None,
                  probability_masses_orc=None, probability_masses_wh=None,
-                 transitivity_orc=None, semantic_distractor=None,
-                 eval_results_dir=None):
+                 transitivity_orc=None, semantic_distractor=None):
         self.eval_steps        = log_scale_steps(max_steps, n_points, start_step)
         self.output_dir        = Path(output_dir)
         self.tokenizer         = tokenizer
         self.results_dir       = (
-            Path(eval_results_dir) if eval_results_dir
-            else self.output_dir / "eval_results"
+            self.output_dir / "eval_results"
         )
         self.paradigms         = (
             eval_blimp.load_paradigms(Path(blimp_dir), tokenizer) if blimp_dir else None
