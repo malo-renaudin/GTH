@@ -6,19 +6,19 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--output_file", type=str, default="generate_simple_datasets/generated_simple_datasets/wh_movement_factorial.csv")
 args = parser.parse_args()
 
-nouns        = ["boy", "student", "doctor", "artist", "athlete",
-                "girl", "pilot", "scientist", "engineer", "teacher"]
+nouns        = ["boy", "student", "doctor", "artist", "nurse",
+                "girl", "pilot", "guard", "judge", "teacher"]  # replaced: athlete → nurse, scientist → guard, engineer → judge
 verbs_ing    = ["writing", "reading", "singing", "drawing", "painting"]
 wh_words     = ["What"]                                                  # +filler
 no_fillers   = ["This", "That", "It"]                                   # -filler
 
-# Only semantically compatible verb-object pairs
+# Only semantically compatible verb-object pairs — single GPT2 tokens only
 VERB_OBJECTS = {
     "writing":  ["a song", "a book", "a poem", "a letter", "a story"],
     "reading":  ["a book", "a poem", "a letter", "a story"],
-    "singing":  ["a song", "a melody", "a lullaby"],
+    "singing":  ["a song", "a melody", "a chant"],                   # replaced: lullaby → chant
     "drawing":  ["a portrait", "a map", "a sketch"],
-    "painting": ["a portrait", "a mural", "a landscape"],
+    "painting": ["a portrait", "a mural", "a scene"],               # replaced: landscape → scene
 }
 
 rows = []
