@@ -294,3 +294,29 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def run(ckpt_dir: str, csv_path: str, out_csv_path: str, batch_size: int = 32) -> None:
+    """Callable entry-point used by the training callback."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir, local_files_only=True)
+    with open(csv_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    input_fields = list(rows[0].keys())
+    surprisal_rows, lme_rows = run_checkpoint(Path(ckpt_dir), tokenizer, rows, device, batch_size)
+
+    out = Path(out_csv_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out_fields = input_fields + ["step", "surprisal_first", "surprisal_mean"]
+    with open(out, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=out_fields)
+        writer.writeheader()
+        writer.writerows(surprisal_rows)
+
+    lme_fields = ["step", "surprisal_col", "n_obs", "n_items", "converged",
+                  "licensing_interaction", "p_interaction",
+                  "ml_interaction", "ml_interaction_ci_low", "ml_interaction_ci_high"]
+    with open(out.with_stem(out.stem + "_lme"), "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=lme_fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(lme_rows)

@@ -201,6 +201,15 @@ def write_rows(rows: List[dict], result_name: Path) -> None:
         writer.writerows(rows)
 
 
+def run(ckpt_dir: str, csv_path: str, out_csv_path: str) -> None:
+    """Callable entry-point used by the training callback."""
+    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir, local_files_only=True)
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        csv_rows = list(csv.DictReader(f))
+    rows = compute_one_checkpoint(Path(ckpt_dir), tokenizer, csv_rows)
+    write_rows(rows, Path(out_csv_path))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------

@@ -29,9 +29,15 @@ argument_parser.add_argument("--svo_wh", type=float, default=0.05)
 argument_parser.add_argument("--svo_orc", type=float, default=0.05)
 argument_parser.add_argument("--log-scale-n-points",   type=int, default=20)
 argument_parser.add_argument("--log-scale-start-step", type=int, default=10)
-argument_parser.add_argument("--blimp-dir",            type=str, default="blimp_data")
-argument_parser.add_argument("--nested-eval-dataset",  type=str, default="short_nested_inner_english.json")
-argument_parser.add_argument("--eval-results-dir",     type=str, default="result/good_training_test")
+argument_parser.add_argument("--blimp-dir",            type=str, default="eval_data/blimp_data")
+argument_parser.add_argument("--nested-inner",         type=str, default="eval_data/short_nested_inner_english.json")
+argument_parser.add_argument("--nested-outer",         type=str, default="eval_data/short_nested_outer_english.json")
+argument_parser.add_argument("--locality",             type=str, default="eval_data/locality.json")
+argument_parser.add_argument("--filler-gap-orc",       type=str, default="eval_data/filler_gap_orc.csv")
+argument_parser.add_argument("--filler-gap-wh",        type=str, default="eval_data/filler_gap_wh.csv")
+argument_parser.add_argument("--transitivity-orc",     type=str, default="eval_data/orc_transitivity.csv")
+argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractors.csv")
+argument_parser.add_argument("--eval-results-dir",     type=str, default=None)
 argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
 
@@ -235,17 +241,22 @@ data_collator = DataCollatorForLanguageModeling(
 )
 
 callbacks = []
-if args.blimp_dir or args.nested_eval_dataset:
-    callbacks.append(LogScaleCallback(
-        max_steps           = training_args.max_steps,
-        n_points            = args.log_scale_n_points,
-        start_step          = args.log_scale_start_step,
-        output_dir          = args.output_dir,
-        tokenizer           = tokenizer,
-        blimp_dir           = args.blimp_dir,
-        nested_eval_dataset = args.nested_eval_dataset,
-        eval_results_dir    = args.eval_results_dir,
-    ))
+callbacks.append(LogScaleCallback(
+    max_steps            = training_args.max_steps,
+    n_points             = args.log_scale_n_points,
+    start_step           = args.log_scale_start_step,
+    output_dir           = args.output_dir,
+    tokenizer            = tokenizer,
+    blimp_dir            = args.blimp_dir,
+    nested_inner         = args.nested_inner,
+    nested_outer         = args.nested_outer,
+    locality             = args.locality,
+    filler_gap_orc       = args.filler_gap_orc,
+    filler_gap_wh        = args.filler_gap_wh,
+    transitivity_orc     = args.transitivity_orc,
+    semantic_distractor  = args.semantic_distractor,
+    eval_results_dir     = args.eval_results_dir,
+))
 
 trainer = Trainer(
     model=model,
