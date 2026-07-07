@@ -36,7 +36,7 @@ argument_parser.add_argument("--locality",             type=str, default="eval_d
 argument_parser.add_argument("--filler-gap-orc",       type=str, default="eval_data/filler_gap_orc.csv")
 argument_parser.add_argument("--filler-gap-wh",        type=str, default="eval_data/filler_gap_wh.csv")
 argument_parser.add_argument("--transitivity-orc",     type=str, default="eval_data/orc_transitivity.csv")
-argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractors.csv")
+argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractor.csv")
 argument_parser.add_argument("--eval-results-dir",     type=str, default=None)
 argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
