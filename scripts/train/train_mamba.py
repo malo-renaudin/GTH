@@ -233,7 +233,7 @@ training_args = TrainingArguments(
     remove_unused_columns=False,
     gradient_accumulation_steps=config.get("gradient_accumulation_steps", 1),
     bf16=True,
-    torch_compile=False,
+    torch_compile=True,
     optim="adamw_torch_fused",
 
 
