@@ -65,8 +65,8 @@ echo "${CMD[@]}"
 #SBATCH --time=20:00:00
 
 #SBATCH --array=0-3
-#SBATCH --error=results/pb_mass/error_eval_%A_%a.log
-#SBATCH --output=results/pb_mass/output_eval_%A_%a.log
+#SBATCH --error=results/fgeval/error_eval_%A_%a.log
+#SBATCH --output=results/fgeval/output_eval_%A_%a.log
 
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
