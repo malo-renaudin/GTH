@@ -136,43 +136,49 @@ class PackedStreamingDataset(TorchIterableDataset):
         iters = [iter(ld()) for ld in loaders]
 
         eos = self.tokenizer.eos_token
-        buffer = []
-        batch = []
+        # One independent buffer and batch per source.
+        buffers = [[] for _ in loaders]
+        batches = [[] for _ in loaders]
+
+        def fill_buffer(i):
+            """Consume source i until its buffer holds at least block_size tokens."""
+            while len(buffers[i]) < self.block_size:
+                try:
+                    example = next(iters[i])
+                except StopIteration:
+                    iters[i] = iter(loaders[i]())
+                    example = next(iters[i])
+
+                batches[i].append(example["text"].strip())
+
+                if len(batches[i]) >= self.batch_text_size:
+                    ids_list = self.tokenizer(
+                        [t + eos for t in batches[i]],
+                        add_special_tokens=False
+                    )["input_ids"]
+                    for ids in ids_list:
+                        buffers[i].extend(ids)
+                    batches[i] = []
 
         while True:
+            if self.max_samples and n_yielded >= self.max_samples:
+                return
+
+            # Pick a source by weight — this directly controls the token ratio
+            # because every chosen source yields exactly one block_size-token block.
             idx = rng.choices(range(len(loaders)), weights=weights)[0]
 
-            try:
-                example = next(iters[idx])
-            except StopIteration:
-                iters[idx] = iter(loaders[idx]())
-                example = next(iters[idx])
+            fill_buffer(idx)
 
-            batch.append(example["text"].strip())
+            chunk = torch.tensor(buffers[idx][:self.block_size], dtype=torch.long)
+            buffers[idx] = buffers[idx][self.block_size:]
+            n_yielded += 1
 
-            if len(batch) >= self.batch_text_size:
-                ids_list = self.tokenizer(
-                    [t + eos for t in batch],
-                    add_special_tokens=False
-                )["input_ids"]
-
-                for ids in ids_list:
-                    buffer.extend(ids)
-
-                batch = []
-
-            while len(buffer) >= self.block_size:
-                if self.max_samples and n_yielded >= self.max_samples:
-                    return
-                chunk = torch.tensor(buffer[:self.block_size], dtype=torch.long)
-                buffer = buffer[self.block_size:]
-                n_yielded += 1
-
-                yield {
-                    "input_ids": chunk,
-                    "labels": chunk.clone(),
-                    "attention_mask": torch.ones_like(chunk),
-                }
+            yield {
+                "input_ids": chunk,
+                "labels": chunk.clone(),
+                "attention_mask": torch.ones_like(chunk),
+            }
 
 # ---------------------------------------------------------------------------
 # Dataset instantiation
