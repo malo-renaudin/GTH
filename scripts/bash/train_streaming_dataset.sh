@@ -9,14 +9,14 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=20:00:00
-#SBATCH --error=results/both_augmented/error_train_streaming%a.log
-#SBATCH --output=results/both_augmented/output_train_streaming_%a.log
+#SBATCH --error=results/orc_augmented/error_train_streaming%a.log
+#SBATCH --output=results/orc_augmented/output_train_streaming_%a.log
 
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
 python scripts/train/streaming_dataset.py \
-   --output-dir results/both_augmented\
+   --output-dir results/orc_augmented\
    --probability-masses-orc eval_data/orc_test.txt \
    --probability-masses-wh  eval_data/wh_test.txt \
    --blimp-dir eval_data/blimp_data \
@@ -25,7 +25,7 @@ python scripts/train/streaming_dataset.py \
    --filler-gap-orc eval_data/filler_gap_orc.csv \
    --filler-gap-wh eval_data/filler_gap_wh.csv \
    --c4 0.9 \
-   --orc 0.05 \
-   --wh 0.05 \
+   --orc 0.1 \
+   --wh 0 \
    --svo_wh 0 \
    --svo_orc 0 \
