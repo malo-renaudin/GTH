@@ -75,8 +75,37 @@ def main():
 
     # build the list of checkpoints from either --checkpoints or --checkpoints-dir
     ckpt_list = []
+    seen = set()
+
+    def _add_ckpt(candidate: str):
+        if candidate in seen:
+            return
+        seen.add(candidate)
+        ckpt_list.append(candidate)
+
     if args.checkpoints:
-        ckpt_list.extend(args.checkpoints)
+        for item in args.checkpoints:
+            p = Path(item)
+            # if it's a local directory, expand it appropriately
+            if p.exists() and p.is_dir():
+                if _looks_like_hf_checkpoint(p):
+                    _add_ckpt(str(p))
+                else:
+                    found = False
+                    for child in sorted(p.iterdir()):
+                        if child.name.startswith("."):
+                            continue
+                        if _looks_like_hf_checkpoint(child):
+                            _add_ckpt(str(child))
+                            found = True
+                        else:
+                            print(f"Skipping {child}: not an HF checkpoint folder")
+                    if not found:
+                        print(f"No valid checkpoint subfolders found in {p}")
+            else:
+                # treat as HF hub id or file path; include as-is
+                _add_ckpt(item)
+
     if args.checkpoints_dir:
         d = Path(args.checkpoints_dir)
         if not d.exists():
@@ -88,7 +117,7 @@ def main():
             if child.name.startswith("."):
                 continue
             if _looks_like_hf_checkpoint(child):
-                ckpt_list.append(str(child))
+                _add_ckpt(str(child))
             else:
                 print(f"Skipping {child}: not an HF checkpoint folder")
 
