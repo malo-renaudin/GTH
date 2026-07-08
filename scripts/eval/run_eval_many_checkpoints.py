@@ -47,6 +47,19 @@ def run_eval(checkpoint: str, orc_test: str, wh_test: str, out_dir: str, device:
     return True
 
 
+def _looks_like_hf_checkpoint(path: Path) -> bool:
+    """Return True if the path contains files typical of an HF checkpoint folder."""
+    if not path.exists():
+        return False
+    # tokenizers
+    has_tokenizer = any((path / name).exists() for name in ("tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt", "spiece.model"))
+    # model weights
+    has_model = any((path / name).exists() for name in ("pytorch_model.bin", "model.safetensors")) or any(str(p).endswith(".bin") for p in path.glob("pytorch_model-*.bin"))
+    # config
+    has_config = (path / "config.json").exists()
+    return has_model and (has_tokenizer or has_config)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoints", nargs="+", required=False, help="List of HF checkpoint ids or local paths")
@@ -69,12 +82,15 @@ def main():
         if not d.exists():
             print(f"Checkpoints directory does not exist: {d}")
             return
-        # include immediate subdirectories and files (useful for HF-style folders or tarballs)
+        # include immediate subdirectories and files that look like HF checkpoints
         for child in sorted(d.iterdir()):
             # skip hidden files
             if child.name.startswith("."):
                 continue
-            ckpt_list.append(str(child))
+            if _looks_like_hf_checkpoint(child):
+                ckpt_list.append(str(child))
+            else:
+                print(f"Skipping {child}: not an HF checkpoint folder")
 
     if not ckpt_list:
         print("No checkpoints found. Provide --checkpoints or --checkpoints-dir")
