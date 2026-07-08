@@ -68,7 +68,12 @@ def pluralize_noun(noun: str) -> str:
 
 
 def _load_model_and_tokenizer(checkpoint: str, device: str):
-    tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=True)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=True)
+    except Exception:
+        # some checkpoints don't provide a fast tokenizer or require optional
+        # packages (sentencepiece/tiktoken). fall back to the slow tokenizer.
+        tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=False)
     model = AutoModelForCausalLM.from_pretrained(checkpoint)
     # make sure we have a pad token
     if tokenizer.pad_token_id is None:
