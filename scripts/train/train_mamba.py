@@ -18,7 +18,7 @@ from log_scale_callback import LogScaleCallback
 
 
 argument_parser = argparse.ArgumentParser()
-argument_parser.add_argument("--model-name", type=str, default="mamba-130M")
+argument_parser.add_argument("--model-name", type=str, default="scripts/train/.cache/mamba2-130m")
 argument_parser.add_argument("--config", type=str, default="configs/hf/mamba.yaml")
 argument_parser.add_argument("--cache-dir", type=str, default="scripts/train/.cache")
 argument_parser.add_argument("--output-dir", type=str)
@@ -48,7 +48,7 @@ _n_workers = config.get("dataloader_num_workers", 4)
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path   = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
-tokenizer = AutoTokenizer.from_pretrained(args.model_name, local_files_only=True, use_fast=True)
+tokenizer = AutoTokenizer.from_pretrained(args.model_name, local_files_only=True, use_fast=False)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.model_max_length = int(1e30)  # suppress spurious long-sequence warnings
 
