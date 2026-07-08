@@ -31,7 +31,7 @@ def compute_gap_surprisals_batch(
         encoded = []
         for pre_gap, post_gap in batch:
             context_ids = tokenizer.encode(pre_gap, add_special_tokens=False)
-            suffix_ids  = tokenizer.encode(" " + post_gap, add_special_tokens=False)
+            suffix_ids  = tokenizer.encode(post_gap, add_special_tokens=False)
             encoded.append((context_ids, suffix_ids))
 
         max_len = max(len(c) + len(s) for c, s in encoded)
