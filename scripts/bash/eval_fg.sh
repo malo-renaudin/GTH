@@ -50,3 +50,43 @@ fi
 echo "Running checkpoint [$SLURM_ARRAY_TASK_ID]: $CKPT"
 echo "${CMD[@]}"
 "${CMD[@]}"
+
+
+#!/bin/bash
+#SBATCH --account=ywa@h100
+#SBATCH --partition=gpu_p6
+#SBATCH --qos=qos_gpu_h100-t3
+#SBATCH --constraint=h100
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=24
+#SBATCH --hint=nomultithread
+#SBATCH --time=20:00:00
+
+#SBATCH --array=0-3
+#SBATCH --error=results/pb_mass/error_eval_%A_%a.log
+#SBATCH --output=results/pb_mass/output_eval_%A_%a.log
+
+source $WORK/miniconda3/etc/profile.d/conda.sh
+conda activate litgpt_jz
+
+experiments=(
+    "baseline_no_augmentation"
+    "baseline_orc_augmented"
+    "baseline_wh_augmented"
+    "baseline_both_augmented"
+)
+
+EXP=${experiments[$SLURM_ARRAY_TASK_ID]}
+
+echo "Running evaluation for: $EXP"
+
+python scripts/eval/run_eval_many_checkpoints.py \
+    --checkpoints-dir results/${EXP} \
+    --input-csv eval_data/filler_gap_wh.csv\
+    --out-dir results/${EXP}/eval_summary/ \
+python scripts/eval/run_eval_many_checkpoints.py \
+    --checkpoints-dir results/${EXP} \
+    --input-csv eval_data/filler_gap_orc.csv\
+    --out-dir results/${EXP}/eval_summary/ \
