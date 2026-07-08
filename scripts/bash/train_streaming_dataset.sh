@@ -9,14 +9,14 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=20:00:00
-#SBATCH --error=results/baseline_both_augmented/error_train_streaming%a.log
-#SBATCH --output=results/baseline_both_augmented/output_train_streaming_%a.log
+#SBATCH --error=results/both_augmented/error_train_streaming%a.log
+#SBATCH --output=results/both_augmented/output_train_streaming_%a.log
 
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
 python scripts/train/streaming_dataset.py \
-   --output-dir results/baseline_both_augmented\
+   --output-dir results/both_augmented\
    --probability-masses-orc eval_data/orc_test.txt \
    --probability-masses-wh  eval_data/wh_test.txt \
    --blimp-dir eval_data/blimp_data \
