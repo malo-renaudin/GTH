@@ -42,8 +42,8 @@ v_opts_orc = [("visits", "visit"), ("helps", "help"), ("avoids", "avoid"), ("fol
 adj1_opts_orc = ["big", "tall", "young", "strong", "kind"]
 adj2_opts_orc = ["beautiful", "smart", "brave", "famous", "honest"]
 adv1_opts_orc = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
-cont_sing_orc = ["is eating an apple", "is watching a movie", "is reading a book", "likes to dance", "enjoys music", "likes climbing"]
-cont_plur_orc = ["are eating an apple", "are watching a movie", "are reading a book", "like to dance", "enjoy music", "like climbing"]
+cont_sing_orc = ["is eating", "is watching", "is reading", "likes", "enjoys", "likes"]
+cont_plur_orc = ["are eating", "are watching", "are reading", "like", "enjoy", "like"]
 
 # WH vocabulary (from generate_simple_datasets/wh.py)
 n1_opts_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist"]
