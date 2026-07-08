@@ -8,9 +8,11 @@ from transformers import (
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
-
+    Mamba2Config, Mamba2ForCausalLM,
     PreTrainedTokenizer
 )
+
+
 import argparse
 import yaml
 import torch
@@ -48,7 +50,11 @@ _n_workers = config.get("dataloader_num_workers", 4)
 c4_train_path = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/train"
 c4_val_path   = "/lustre/fsmisc/dataset/HuggingFace/c4/realnewslike/validation"
 
-tokenizer = AutoTokenizer.from_pretrained(args.model_name, local_files_only=True, use_fast=False)
+tokenizer = AutoTokenizer.from_pretrained(
+    "scripts/train/.cache/gpt-neox-tokenizer",
+    local_files_only=True,
+    use_fast=True
+)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.model_max_length = int(1e30)  # suppress spurious long-sequence warnings
 
@@ -198,10 +204,11 @@ validation_dataset = PackedStreamingDataset(
     tokenizer=tokenizer,
     max_samples=args.eval_max_samples,
 )
-hf_config = AutoConfig.from_pretrained(args.model_name, 
-                                       cache_dir= args.cache_dir, 
-                                       local_files_only=True)
-model = AutoModelForCausalLM.from_config(hf_config)
+hf_config = Mamba2Config.from_pretrained(
+    "scripts/train/.cache/mamba2-130m"
+)
+
+model = Mamba2ForCausalLM(hf_config)
 model.config.use_cache = False
 
 training_args = TrainingArguments(
