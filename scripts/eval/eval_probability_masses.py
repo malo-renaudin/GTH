@@ -265,12 +265,18 @@ def _score_candidates_cached(
                 attn_mask[j, ctx_len : ctx_len + len(cand)] = 1
 
         # Expand KV cache to batch size (.contiguous() required for batched matmuls)
+        # Support both legacy tuple-of-(k,v) and newer DynamicCache objects.
+        if hasattr(past_kv, "key_cache"):
+            # transformers >= 4.38 DynamicCache
+            kv_pairs = zip(past_kv.key_cache, past_kv.value_cache)
+        else:
+            kv_pairs = iter(past_kv)
         past_kv_batch = tuple(
             (
                 k.expand(bsz, -1, -1, -1).contiguous(),
                 v.expand(bsz, -1, -1, -1).contiguous(),
             )
-            for k, v in past_kv
+            for k, v in kv_pairs
         )
 
         with amp_ctx:
