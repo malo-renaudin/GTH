@@ -37,8 +37,8 @@ argument_parser.add_argument("--filler-gap-orc",       type=str, default="eval_d
 argument_parser.add_argument("--filler-gap-wh",        type=str, default="eval_data/filler_gap_wh.csv")
 argument_parser.add_argument("--transitivity-orc",     type=str, default="eval_data/orc_transitivity.csv")
 argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractor.csv")
-argument_parser.add_argument("--probability-masses-orc", type=str, default=None)
-argument_parser.add_argument("--probability-masses-wh",  type=str, default=None)
+argument_parser.add_argument("--probability-masses-orc", type=str, default="datasets/orc_test.txt")
+argument_parser.add_argument("--probability-masses-wh",  type=str, default="datasets/wh_test.txt")
 argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
 
@@ -188,8 +188,8 @@ _train_candidates = [
     (_c4_train_loader,                                  args.c4),
     (_make_text_loader("data/orc_final.txt"),                args.orc),
     (_make_text_loader("data/wh_final.txt"),                 args.wh),
-    (_make_text_loader("data/declaratives_from_wh5.txt"), args.svo_wh),
-    (_make_text_loader("data/declaratives_from_orc7.txt"), args.svo_orc),
+    (_make_text_loader("datasets/wh.txt"), args.svo_wh),
+    (_make_text_loader("datasets/orc.txt"), args.svo_orc),
 ]
 
 train_dataset = PackedStreamingDataset(

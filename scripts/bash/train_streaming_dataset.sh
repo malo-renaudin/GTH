@@ -17,8 +17,8 @@ conda activate litgpt_jz
 
 python scripts/train/streaming_dataset.py \
    --output-dir results/wh_augmented\
-   --probability-masses-orc eval_data/orc_test.txt \
-   --probability-masses-wh  eval_data/wh_test.txt \
+   --probability-masses-orc datasets/orc_test.txt \
+   --probability-masses-wh  datasets/wh_test.txt \
    --blimp-dir eval_data/blimp_data \
    --nested-inner eval_data/short_nested_inner_english.json \
    --nested-outer eval_data/short_nested_outer_english.json \
