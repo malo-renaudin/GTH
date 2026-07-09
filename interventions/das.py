@@ -145,21 +145,6 @@ def make_intervenable(model, layer, device):
     return intervenable
 
 
-def gap_position(tokenizer, text, ys):
-    """Return the logit position that predicts ys in text.
-
-    Finds the token index of ys in text, then returns index - 1
-    (the position whose logit predicts that token).
-    Returns None if ys cannot be found.
-    """
-    pos = find_token_position(tokenizer, text, ys)
-    if pos is None or pos == 0:
-        if pos == 0:
-            print(f"WARNING: ys '{ys}' is at position 0, cannot use pos-1 in {text!r}")
-        return None
-    return pos - 1
-
-
 def build_unit_locations(base_positions, source_positions):
     return {
         "sources->base": (
@@ -210,14 +195,12 @@ def train_intervention(intervenable, tokenizer, train_df,
             _, cf_outputs = intervenable(base_enc, [src_enc], unit_locations=unit_locations)
             logits = cf_outputs.logits  # (B, seq, vocab)
 
-            # CE at gap position (pos of ys - 1), first token of ys as target.
+            # CE at anchor position (the verb token whose logit predicts the continuation).
             loss_val = torch.tensor(0.0, device=device, requires_grad=False)
             n_valid_loss = 0
             for j, i in enumerate(valid):
                 row = batch.iloc[i]
-                lpos = gap_position(tokenizer, row["base_text"], row["ys"])
-                if lpos is None:
-                    continue
+                lpos = base_pos[i]  # logit at verb position predicts next token
                 ys_tok = tokenize_targets(tokenizer, row["ys"], device)[0:1]
                 loss_val = loss_val + F.cross_entropy(logits[j, lpos, :].unsqueeze(0), ys_tok)
                 n_valid_loss += 1
@@ -269,9 +252,7 @@ def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
 
         for j, idx in enumerate(valid):
             row = batch.iloc[idx]
-            lpos = gap_position(tokenizer, row["base_text"], row["ys"])
-            if lpos is None:
-                continue
+            lpos = base_pos[idx]  # anchor (verb) logit predicts the continuation
             yb_ids = tokenize_targets(tokenizer, row["yb"], device)
             ys_ids = tokenize_targets(tokenizer, row["ys"], device)
 
