@@ -242,6 +242,7 @@ def train_intervention(intervenable, tokenizer, train_df,
 def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
                  batch_size, device):
     odds_all = []
+    delta_all = []
     for start in tqdm(range(0, len(eval_df), batch_size), desc="eval"):
         batch = eval_df.iloc[start:start + batch_size]
 
@@ -280,10 +281,14 @@ def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
             log_p_yb_int = sequence_log_prob(int_logits[j:j+1], yb_ids, lpos).item()
 
             odds_all.append((log_p_yb_base - log_p_ys_base) + (log_p_ys_int - log_p_yb_int))
+            delta_all.append(log_p_ys_int - log_p_ys_base)
 
     if not odds_all:
-        return float("nan"), float("nan")
-    return float(np.mean(odds_all)), float(np.std(odds_all))
+        return float("nan"), float("nan"), float("nan"), float("nan")
+    return (
+        float(np.mean(odds_all)), float(np.std(odds_all)),
+        float(np.mean(delta_all)), float(np.std(delta_all)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +331,7 @@ def main():
 
             eval_intervenable = make_intervenable(eval_model, layer, device)
             eval_intervenable.load_state_dict(state_dict)
-            odds_mean, odds_std = evaluate_odds(
+            odds_mean, odds_std, delta_mean, delta_std = evaluate_odds(
                 eval_intervenable, eval_model, eval_tokenizer, ev,
                 args.batch_size, device,
             )
@@ -336,9 +341,11 @@ def main():
                 "position_label": label,
                 "odds_mean": odds_mean,
                 "odds_std": odds_std,
+                "delta_logp_mean": delta_mean,
+                "delta_logp_std": delta_std,
                 "train_loss": train_loss,
             })
-            print(f"  odds_mean={odds_mean:.4f}  odds_std={odds_std:.4f}  train_loss={train_loss:.4f}")
+            print(f"  odds_mean={odds_mean:.4f}  delta_logp_mean={delta_mean:.4f}  train_loss={train_loss:.4f}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     pd.DataFrame(results).to_csv(os.path.join(args.output_dir, "results.csv"), index=False)
