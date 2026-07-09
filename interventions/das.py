@@ -40,8 +40,6 @@ def parse_args():
     p.add_argument("--train-df", required=True)
     p.add_argument("--eval-df", required=True)
     p.add_argument("--layers", nargs="+", type=int, required=True)
-    p.add_argument("--loss-positions", nargs="+", type=int, required=True,
-                   help="token indices (in the base sentence) where CE / ODDS are computed")
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--lr", type=float, default=1e-3)
@@ -112,21 +110,15 @@ def tokenize_targets(tokenizer, target, device):
     return torch.tensor(ids, device=device)
 
 
-def sequence_log_prob(logits, target_ids, loss_positions):
-    """Sum of log-probs for target_ids at the given loss_positions.
+def sequence_log_prob(logits, target_ids, loss_position):
+    """Log-prob of target_ids[0] at loss_position.
 
-    logits         : (1, seq_len, vocab)
-    target_ids     : (n,)  — tokens to score (first n used)
-    loss_positions : list[int] — positions p such that logits[:,p,:] predicts
-                     the token at p+1; we use the first min(n, len(positions))
+    logits        : (1, seq_len, vocab)
+    target_ids    : (n,)  — first token used
+    loss_position : int   — position p such that logits[:,p,:] predicts token at p+1
     Returns a scalar tensor.
     """
-    n = min(len(target_ids), len(loss_positions))
-    log_prob = torch.tensor(0.0, device=logits.device)
-    for k in range(n):
-        pos = loss_positions[k]
-        log_prob = log_prob + F.log_softmax(logits[0, pos, :], dim=-1)[target_ids[k]]
-    return log_prob
+    return F.log_softmax(logits[0, loss_position, :], dim=-1)[target_ids[0]]
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +145,21 @@ def make_intervenable(model, layer, device):
     return intervenable
 
 
+def gap_position(tokenizer, text, ys):
+    """Return the logit position that predicts ys in text.
+
+    Finds the token index of ys in text, then returns index - 1
+    (the position whose logit predicts that token).
+    Returns None if ys cannot be found.
+    """
+    pos = find_token_position(tokenizer, text, ys)
+    if pos is None or pos == 0:
+        if pos == 0:
+            print(f"WARNING: ys '{ys}' is at position 0, cannot use pos-1 in {text!r}")
+        return None
+    return pos - 1
+
+
 def build_unit_locations(base_positions, source_positions):
     return {
         "sources->base": (
@@ -174,7 +181,7 @@ def resolve_positions(tokenizer, texts, anchors):
 # Training
 # ---------------------------------------------------------------------------
 
-def train_intervention(intervenable, tokenizer, train_df, loss_positions,
+def train_intervention(intervenable, tokenizer, train_df,
                        epochs, batch_size, lr, device):
     optimizer = torch.optim.Adam(intervenable.get_trainable_parameters(), lr=lr)
     losses = []
@@ -203,16 +210,20 @@ def train_intervention(intervenable, tokenizer, train_df, loss_positions,
             _, cf_outputs = intervenable(base_enc, [src_enc], unit_locations=unit_locations)
             logits = cf_outputs.logits  # (B, seq, vocab)
 
-            # CE at each loss_position, first token of ys as target.
-            ys_first = torch.tensor(
-                [tokenize_targets(tokenizer, batch.iloc[i]["ys"], device)[0].item()
-                 for i in valid],
-                device=device,
-            )
-            loss = sum(
-                F.cross_entropy(logits[:, pos, :], ys_first)
-                for pos in loss_positions
-            ) / len(loss_positions)
+            # CE at gap position (pos of ys - 1), first token of ys as target.
+            loss_val = torch.tensor(0.0, device=device, requires_grad=False)
+            n_valid_loss = 0
+            for j, i in enumerate(valid):
+                row = batch.iloc[i]
+                lpos = gap_position(tokenizer, row["base_text"], row["ys"])
+                if lpos is None:
+                    continue
+                ys_tok = tokenize_targets(tokenizer, row["ys"], device)[0:1]
+                loss_val = loss_val + F.cross_entropy(logits[j, lpos, :].unsqueeze(0), ys_tok)
+                n_valid_loss += 1
+            if n_valid_loss == 0:
+                continue
+            loss = loss_val / n_valid_loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -229,7 +240,7 @@ def train_intervention(intervenable, tokenizer, train_df, loss_positions,
 
 @torch.no_grad()
 def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
-                 loss_positions, batch_size, device):
+                 batch_size, device):
     odds_all = []
     for start in tqdm(range(0, len(eval_df), batch_size), desc="eval"):
         batch = eval_df.iloc[start:start + batch_size]
@@ -257,13 +268,16 @@ def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
 
         for j, idx in enumerate(valid):
             row = batch.iloc[idx]
+            lpos = gap_position(tokenizer, row["base_text"], row["ys"])
+            if lpos is None:
+                continue
             yb_ids = tokenize_targets(tokenizer, row["yb"], device)
             ys_ids = tokenize_targets(tokenizer, row["ys"], device)
 
-            log_p_yb_base = sequence_log_prob(base_logits[j:j+1], yb_ids, loss_positions).item()
-            log_p_ys_base = sequence_log_prob(base_logits[j:j+1], ys_ids, loss_positions).item()
-            log_p_ys_int = sequence_log_prob(int_logits[j:j+1], ys_ids, loss_positions).item()
-            log_p_yb_int = sequence_log_prob(int_logits[j:j+1], yb_ids, loss_positions).item()
+            log_p_yb_base = sequence_log_prob(base_logits[j:j+1], yb_ids, lpos).item()
+            log_p_ys_base = sequence_log_prob(base_logits[j:j+1], ys_ids, lpos).item()
+            log_p_ys_int = sequence_log_prob(int_logits[j:j+1], ys_ids, lpos).item()
+            log_p_yb_int = sequence_log_prob(int_logits[j:j+1], yb_ids, lpos).item()
 
             odds_all.append((log_p_yb_base - log_p_ys_base) + (log_p_ys_int - log_p_yb_int))
 
@@ -301,7 +315,7 @@ def main():
 
             intervenable = make_intervenable(train_model, layer, device)
             train_loss = train_intervention(
-                intervenable, train_tokenizer, tr, args.loss_positions,
+                intervenable, train_tokenizer, tr,
                 args.epochs, args.batch_size, args.lr, device,
             )
 
@@ -314,7 +328,7 @@ def main():
             eval_intervenable.load_state_dict(state_dict)
             odds_mean, odds_std = evaluate_odds(
                 eval_intervenable, eval_model, eval_tokenizer, ev,
-                args.loss_positions, args.batch_size, device,
+                args.batch_size, device,
             )
 
             results.append({
