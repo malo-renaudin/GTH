@@ -186,8 +186,8 @@ class PackedStreamingDataset(TorchIterableDataset):
 
 _train_candidates = [
     (_c4_train_loader,                                  args.c4),
-    (_make_text_loader("datasets/orc_arrow.txt"),                args.orc),
-    (_make_text_loader("datasets/wh_arrow.txt"),                 args.wh),
+    (_make_text_loader("datasets/orc_arrow"),                args.orc),
+    (_make_text_loader("datasets/wh_arrow"),                 args.wh),
     # (_make_text_loader("datasets/wh.txt"), args.svo_wh),
     # (_make_text_loader("datasets/orc.txt"), args.svo_orc),
 ]
