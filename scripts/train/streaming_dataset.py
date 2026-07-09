@@ -262,8 +262,8 @@ callbacks.append(LogScaleCallback(
     filler_gap_wh        = args.filler_gap_wh,
     transitivity_orc     = args.transitivity_orc,
     semantic_distractor  = args.semantic_distractor,
-    probability_masses_orc = args.probability_masses_orc,
-    probability_masses_wh  = args.probability_masses_wh,
+    probability_masses_orc = None,
+    probability_masses_wh  = None,
 ))
 
 trainer = Trainer(
