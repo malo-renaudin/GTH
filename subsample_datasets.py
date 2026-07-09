@@ -1,4 +1,5 @@
 import random
+import subprocess
 from pathlib import Path
 
 # Define input and output paths for subsampling datasets
@@ -11,66 +12,85 @@ WH_FINAL = DATA_DIR / "wh_final.txt"
 ORC_TEST = DATA_DIR / "orc_test.txt"
 WH_TEST = DATA_DIR / "wh_test.txt"
 
-def load_lines(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        # Using rstrip('\n') keeps the text clean but preserves empty lines if any exist
-        return [line.rstrip('\n') for line in f]
+IO_BUFFER = 8 << 20  # 8 MB read/write buffers
 
-def save_lines(file_path, lines):
-    with open(file_path, 'w', encoding='utf-8') as f:
-        for line in lines:
-            f.write(line + '\n')
+
+def count_lines(file_path):
+    """Count lines via wc -l — native C speed, no file loaded into memory."""
+    out = subprocess.check_output(["wc", "-l", str(file_path)])
+    return int(out.split()[0])
+
+
+def stream_split(src_path, test_idx_set, test_path, final_path,
+                 total_lines, final_count):
+    """
+    Single streaming pass over src_path.
+    - Lines whose index is in test_idx_set are written to test_path.
+    - From the remaining lines, exactly min(final_count, n_available) lines are
+      selected via Knuth's Algorithm S and written to final_path.
+
+    Memory usage: O(|test_idx_set|) — the full file is never loaded.
+    """
+    n_available = total_lines - len(test_idx_set)
+    n_select = min(final_count, n_available)
+    remaining_to_see = n_available
+    remaining_to_pick = n_select
+
+    with (open(src_path,   "r", encoding="utf-8", buffering=IO_BUFFER) as fin,
+          open(test_path,  "w", encoding="utf-8", buffering=IO_BUFFER) as ftest,
+          open(final_path, "w", encoding="utf-8", buffering=IO_BUFFER) as ffinal):
+
+        for i, line in enumerate(fin):
+            if i in test_idx_set:
+                ftest.write(line)
+            else:
+                # Knuth's Algorithm S: include with prob remaining_to_pick / remaining_to_see
+                if remaining_to_pick > 0:
+                    if random.random() * remaining_to_see < remaining_to_pick:
+                        ffinal.write(line)
+                        remaining_to_pick -= 1
+                    remaining_to_see -= 1
+
 
 def main():
-    # 1. Load the original datasets
-    print("Loading files...")
-    orc_lines = load_lines(ORC_SRC)
-    wh_lines = load_lines(WH_SRC)
-    
-    print(f"Original Orc size: {len(orc_lines)} lines")
-    print(f"Original WH size: {len(wh_lines)} lines")
-    
-    if len(orc_lines) < 1000 or len(wh_lines) < 1000:
+    random.seed(42)
+
+    # 1. Count lines without loading the files into memory
+    print("Counting lines...")
+    orc_total = count_lines(ORC_SRC)
+    wh_total  = count_lines(WH_SRC)
+    print(f"  ORC: {orc_total:,} lines")
+    print(f"  WH:  {wh_total:,} lines")
+
+    if orc_total < 1000 or wh_total < 1000:
         raise ValueError("Both files must have at least 1000 lines to extract the test set.")
 
-    # 2. Shuffle to ensure random splitting
-    # (We shuffle copies to avoid modifying index-based logic if needed later)
-    random.seed(42)  # Set seed for reproducibility; remove if you want true randomness
-    random.shuffle(orc_lines)
-    random.shuffle(wh_lines)
-    
-    # 3. Extract 1000 sentences for the test sets
-    orc_test = orc_lines[:1000]
-    orc_train_pool = orc_lines[1000:]
-    
-    wh_test = wh_lines[:1000]
-    wh_train_pool = wh_lines[1000:]
-    
-    # 4. Downsample WH to match the remaining Orc lines
-    target_count = len(orc_train_pool)
-    print(f"\nTarget final line count (Orc minus test): {target_count}")
-    
-    if len(wh_train_pool) < target_count:
-        print("Warning: wh5.txt has fewer remaining lines than orc7.txt. Taking all remaining WH lines.")
-        wh_final = wh_train_pool
-    else:
-        # Take a random subset matching the target count
-        wh_final = random.sample(wh_train_pool, target_count)
-        
-    orc_final = orc_train_pool
+    # 2. Pick 1000 random line indices for each test set (range() is lazy — O(1) memory)
+    orc_test_idx = set(random.sample(range(orc_total), 1000))
+    wh_test_idx  = set(random.sample(range(wh_total),  1000))
 
-    # 5. Save everything to the new files
-    print("\nSaving new files...")
-    save_lines(ORC_TEST, orc_test)
-    save_lines(WH_TEST, wh_test)
-    save_lines(ORC_FINAL, orc_final)
-    save_lines(WH_FINAL, wh_final)
-    
-    print("Done! Summary of generated files:")
-    print(f" -> {ORC_TEST.name}: {len(orc_test)} lines")
-    print(f" -> {WH_TEST.name}: {len(wh_test)} lines")
-    print(f" -> {ORC_FINAL.name}: {len(orc_final)} lines")
-    print(f" -> {WH_FINAL.name}: {len(wh_final)} lines")
+    target_count = orc_total - 1000
+    wh_available = wh_total - 1000
+    print(f"\nTarget final line count (ORC minus test): {target_count:,}")
+    if wh_available < target_count:
+        print(f"Warning: WH only has {wh_available:,} remaining lines; using all of them.")
+
+    # 3. Stream each file once — no full-file load required
+    print("\nStreaming ORC (1 pass)...")
+    stream_split(ORC_SRC, orc_test_idx, ORC_TEST, ORC_FINAL,
+                 orc_total, final_count=target_count)
+    print(f"  -> {ORC_TEST.name}: 1,000 lines")
+    print(f"  -> {ORC_FINAL.name}: {target_count:,} lines")
+
+    print("\nStreaming WH (1 pass)...")
+    stream_split(WH_SRC, wh_test_idx, WH_TEST, WH_FINAL,
+                 wh_total, final_count=target_count)
+    wh_final_count = min(target_count, wh_available)
+    print(f"  -> {WH_TEST.name}: 1,000 lines")
+    print(f"  -> {WH_FINAL.name}: {wh_final_count:,} lines")
+
+    print("\nDone!")
+
 
 if __name__ == "__main__":
     main()
