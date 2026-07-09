@@ -1,7 +1,7 @@
 import random
 from pathlib import Path
 
-# Define input and output paths
+# Define input and output paths for subsampling datasets
 DATA_DIR = Path("datasets")
 ORC_SRC = DATA_DIR / "orc.txt"
 WH_SRC = DATA_DIR / "wh.txt"
