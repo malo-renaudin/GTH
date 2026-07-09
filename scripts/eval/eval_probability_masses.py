@@ -193,7 +193,7 @@ def _load_model_and_tokenizer(
 
 
 # ---------------------------------------------------------------------------
-# Candidate scorer — batched, no manual KV-cache manipulation
+# Candidate scorer — KV-cache version
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
@@ -206,52 +206,71 @@ def _score_candidates(
     amp_ctx,
     batch_size: int = 64,
 ) -> List[Tuple[float, int]]:
-    """Score candidates by running context + candidate through the model.
-
-    Each forward pass receives a full (context + candidate) sequence so no
-    manual KV-cache manipulation is needed, making this compatible with every
-    version of transformers.  Candidates within a batch share a single forward
-    pass; the context is re-encoded for each batch.
+    """Score candidates using KV-cache: encode context once, then score only candidate tokens.
 
     Returns a list of (log_prob_sum, token_count) in candidate order.
     """
+    import copy
+
     results: List[Tuple[float, int]] = []
     ctx_len = len(context_ids)
 
+    # Encode context once; save KV cache and the last logit (predicts first candidate token)
+    ctx_tensor = torch.tensor([context_ids], dtype=torch.long, device=device)
+    with amp_ctx:
+        ctx_out = model(ctx_tensor, use_cache=True)
+    ctx_last_logit = ctx_out.logits[0, -1, :].float()  # [V]
+    base_cache = ctx_out.past_key_values
+
     for i in range(0, len(candidate_ids_list), batch_size):
         batch = candidate_ids_list[i : i + batch_size]
-        seqs = [context_ids + cand for cand in batch]
-        max_len = max(len(s) for s in seqs)
         bsz = len(batch)
+        max_cand_len = max((len(c) for c in batch), default=0)
 
-        if max_len == ctx_len:  # all candidates empty
+        if max_cand_len == 0:
             results.extend((0.0, 0) for _ in batch)
             continue
 
+        # Copy and expand the context KV cache for this batch
+        cache = copy.deepcopy(base_cache)
+        cache.batch_repeat_interleave(bsz)
+
+        # Build padded candidate input_ids and mask
         input_ids = torch.full(
-            (bsz, max_len), tokenizer.pad_token_id, dtype=torch.long, device=device
+            (bsz, max_cand_len), tokenizer.pad_token_id, dtype=torch.long, device=device
         )
-        attention_mask = torch.zeros(bsz, max_len, dtype=torch.long, device=device)
-        for j, s in enumerate(seqs):
-            input_ids[j, : len(s)] = torch.tensor(s, dtype=torch.long, device=device)
-            attention_mask[j, : len(s)] = 1
+        cand_mask = torch.zeros(bsz, max_cand_len, dtype=torch.long, device=device)
+        for j, cand in enumerate(batch):
+            if cand:
+                input_ids[j, :len(cand)] = torch.tensor(cand, dtype=torch.long, device=device)
+                cand_mask[j, :len(cand)] = 1
+
+        # Full attention mask: all context tokens attended + candidate mask
+        attention_mask = torch.cat(
+            [torch.ones(bsz, ctx_len, dtype=torch.long, device=device), cand_mask],
+            dim=1,
+        )
 
         with amp_ctx:
-            out = model(input_ids=input_ids, attention_mask=attention_mask)
+            out = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=cache,
+                use_cache=False,
+            )
 
-        logits = out.logits[:, :-1, :].float()          # [bsz, max_len-1, V]
-        labels = input_ids[:, 1:]                        # [bsz, max_len-1]
-        lprobs = torch.nn.functional.log_softmax(logits, dim=-1)
-        gold_lp = torch.gather(
-            lprobs, 2, labels.unsqueeze(-1)
-        ).squeeze(-1)                                    # [bsz, max_len-1]
+        # ctx_last_logit predicts cand[0]; out.logits[:, m] predicts cand[m+1]
+        # Concatenate to get one logit per candidate token position
+        ctx_logit_exp = ctx_last_logit.unsqueeze(0).unsqueeze(0).expand(bsz, 1, -1)  # [bsz, 1, V]
+        all_logits = torch.cat(
+            [ctx_logit_exp, out.logits[:, :-1, :].float()], dim=1
+        )  # [bsz, max_cand_len, V]
 
-        positions = torch.arange(1, max_len, device=device).unsqueeze(0)
-        mask_valid = attention_mask[:, 1:].bool()
-        mask_candidate = (positions >= ctx_len) & mask_valid
+        lprobs = torch.nn.functional.log_softmax(all_logits, dim=-1)
+        gold_lp = torch.gather(lprobs, 2, input_ids.unsqueeze(-1)).squeeze(-1)  # [bsz, max_cand_len]
 
-        log_sums = (gold_lp * mask_candidate).sum(dim=1)
-        tok_counts = mask_candidate.sum(dim=1)
+        log_sums = (gold_lp * cand_mask).sum(dim=1)
+        tok_counts = cand_mask.sum(dim=1)
 
         for j in range(bsz):
             results.append((float(log_sums[j].item()), int(tok_counts[j].item())))
