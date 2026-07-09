@@ -1,25 +1,27 @@
 """
 Turn a filler/gap quadruplet CSV into the anchor-based format expected by das.py.
 
-Per quadruplet_id:
-  base_row   = row with filler == --base-filler,   gap == --base-gap
-  source_row = row with filler == --source-filler, gap == --source-gap
-  yb_row     = row with filler == --base-filler,   gap == 1 - --base-gap
+Each example is a direct (base row, source row) pair from the same quadruplet_id.
 
-yb / ys = first word of yb_row / source_row post_gap_text.
+  base_row   = row with filler == --base-filler,  gap == --base-gap
+  source_row = row with filler == --source-filler, gap == --source-gap
+  yb         = first word of base_row.post_gap_text
+  ys         = first word of source_row.post_gap_text
+
+When base and source share the same gap value, yb == ys and ODDS reduces to
+log(p(ys|intervened)/p(ys|base)). For cross-gap pairings yb != ys and the
+full ODDS formula applies.
 
 Anchor words: the last len(--position-words) whitespace tokens of pre_gap_text
-(default: relativizer, "the", noun, embedded verb).  Each anchor is stored as
-the literal word string; das.py resolves the token index at runtime via offset
-mappings, so no tokenizer is needed here.
+(default: relativizer, "the", noun, embedded verb). Stored as literal strings;
+das.py resolves token indices at runtime.
 
-Output columns per row:
+Output columns:
     quadruplet_id, position_label,
     base_text, source_text, yb, ys,
     base_anchor, source_anchor
 
-Output: --output-dir/train.csv and --output-dir/eval.csv, split by
-quadruplet_id so all positions of a quadruplet stay on the same side.
+Output: --output-dir/train.csv and --output-dir/eval.csv, split by quadruplet_id.
 """
 
 import argparse
@@ -63,12 +65,11 @@ def build_rows(df, args):
 
         base_row = find(args.base_filler, args.base_gap)
         source_row = find(args.source_filler, args.source_gap)
-        yb_row = find(args.base_filler, 1 - args.base_gap)
-        if base_row is None or source_row is None or yb_row is None:
+        if base_row is None or source_row is None:
             continue
 
         base_text, source_text = base_row["sentence"], source_row["sentence"]
-        yb = first_word(yb_row["post_gap_text"])
+        yb = first_word(base_row["post_gap_text"])
         ys = first_word(source_row["post_gap_text"])
 
         n = len(args.position_words)
