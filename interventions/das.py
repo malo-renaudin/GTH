@@ -112,17 +112,21 @@ def tokenize_targets(tokenizer, target, device):
     return torch.tensor(ids, device=device)
 
 
-def sequence_log_prob(logits, target_ids):
-    """Sum of log-probs for target_ids using the last len(target_ids) positions.
+def sequence_log_prob(logits, target_ids, loss_positions):
+    """Sum of log-probs for target_ids at the given loss_positions.
 
-    logits     : (1, seq_len, vocab)
-    target_ids : (n,)
+    logits         : (1, seq_len, vocab)
+    target_ids     : (n,)  — tokens to score (first n used)
+    loss_positions : list[int] — positions p such that logits[:,p,:] predicts
+                     the token at p+1; we use the first min(n, len(positions))
     Returns a scalar tensor.
     """
-    n = len(target_ids)
-    # position p predicts the token at p+1; use last n positions as window
-    logp = F.log_softmax(logits[0, -n - 1:-1, :], dim=-1)  # (n, V)
-    return logp[range(n), target_ids].sum()
+    n = min(len(target_ids), len(loss_positions))
+    log_prob = torch.tensor(0.0, device=logits.device)
+    for k in range(n):
+        pos = loss_positions[k]
+        log_prob = log_prob + F.log_softmax(logits[0, pos, :], dim=-1)[target_ids[k]]
+    return log_prob
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +228,8 @@ def train_intervention(intervenable, tokenizer, train_df, loss_positions,
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def evaluate_odds(intervenable, base_model, tokenizer, eval_df, batch_size, device):
+def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
+                 loss_positions, batch_size, device):
     odds_all = []
     for start in tqdm(range(0, len(eval_df), batch_size), desc="eval"):
         batch = eval_df.iloc[start:start + batch_size]
@@ -255,10 +260,10 @@ def evaluate_odds(intervenable, base_model, tokenizer, eval_df, batch_size, devi
             yb_ids = tokenize_targets(tokenizer, row["yb"], device)
             ys_ids = tokenize_targets(tokenizer, row["ys"], device)
 
-            log_p_yb_base = sequence_log_prob(base_logits[j:j+1], yb_ids).item()
-            log_p_ys_base = sequence_log_prob(base_logits[j:j+1], ys_ids).item()
-            log_p_ys_int = sequence_log_prob(int_logits[j:j+1], ys_ids).item()
-            log_p_yb_int = sequence_log_prob(int_logits[j:j+1], yb_ids).item()
+            log_p_yb_base = sequence_log_prob(base_logits[j:j+1], yb_ids, loss_positions).item()
+            log_p_ys_base = sequence_log_prob(base_logits[j:j+1], ys_ids, loss_positions).item()
+            log_p_ys_int = sequence_log_prob(int_logits[j:j+1], ys_ids, loss_positions).item()
+            log_p_yb_int = sequence_log_prob(int_logits[j:j+1], yb_ids, loss_positions).item()
 
             odds_all.append((log_p_yb_base - log_p_ys_base) + (log_p_ys_int - log_p_yb_int))
 
@@ -309,7 +314,7 @@ def main():
             eval_intervenable.load_state_dict(state_dict)
             odds_mean, odds_std = evaluate_odds(
                 eval_intervenable, eval_model, eval_tokenizer, ev,
-                args.batch_size, device,
+                args.loss_positions, args.batch_size, device,
             )
 
             results.append({
