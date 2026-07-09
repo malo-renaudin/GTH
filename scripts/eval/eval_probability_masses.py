@@ -3,22 +3,29 @@
 Evaluate probability mass of NP / VP / question-mark continuations at gap sites.
 
 Usage:
-  python scripts/eval/eval_probability_masses --checkpoint <hf-checkpoint> \
-       --orc_test <orc_test.txt> --wh_test <wh_test.txt> --out results.csv
+  python scripts/eval/eval_probability_masses.py \\
+        --checkpoint <hf-checkpoint> \\
+        --orc_test <orc_test.txt> --wh_test <wh_test.txt> \\
+        --out results.csv [--amp] [--compile]
 
-This script uses the small generation vocabularies from the project's
-generation scripts (copied here) and evaluates, for each test sentence,
-the average geometric-mean probability (per-token) assigned by the model
-to three continuation categories at the gap site: NP, VP and "?".
+Vocabularies match generate_simple_datasets/orc.py and wh.py exactly.
+
+GPU acceleration
+----------------
+* KV-cache reuse: each context sentence is run through the model exactly once;
+  all candidate sets (NP, VP, ?) are scored by expanding that single cache to
+  the candidate batch size and processing only the (short) candidate tokens.
+  This avoids re-running the full context for every candidate group.
+* Autocast (AMP): --amp enables torch.autocast (float16/bfloat16) inference
+  for ~2x throughput on modern GPUs with negligible accuracy change.
+* torch.compile: --compile wraps the model with torch.compile (PyTorch >= 2.0)
+  for an additional ~1.5-2x speedup after a one-time warm-up.
 
 Notes:
 - ORC gap site: right after the first verb in the sentence.
 - WH gap site: right after the final lexical token, immediately before '?'.
-- NP candidates all start with "the"; the script computes P("the"|context)
-  once per context and reuses that value when evaluating NP continuations.
-
-The measured category mass for a sentence is the mean of per-candidate
-geometric means, i.e. (1/N) * sum_c (prod_i p(t_i|ctx)^(1/len_c)).
+- Category mass for a sentence = mean of per-candidate geometric-mean
+  probabilities, i.e. (1/N) * sum_c exp( (1/len_c) * sum_i log p(t_i|ctx) ).
 """
 
 from __future__ import annotations
@@ -27,73 +34,281 @@ import argparse
 import csv
 import math
 import re
-from typing import List, Tuple
+from contextlib import nullcontext
+from typing import List, Optional, Tuple
 
 import torch
 import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-# --- Vocabulary copied (unchanged) from the generation scripts ---
-# ORC vocabulary (from generate_simple_datasets/orc.py)
-n1_opts_orc = ["boy", "student", "doctor", "artist", "athlete"]
-n2_opts_orc = ["girl", "child", "pilot", "scientist", "engineer"]
-v_opts_orc = [("visits", "visit"), ("helps", "help"), ("avoids", "avoid"), ("follows", "follow"), ("greets", "greet")]
-adj1_opts_orc = ["big", "tall", "young", "strong", "kind"]
-adj2_opts_orc = ["beautiful", "smart", "brave", "famous", "honest"]
-adv1_opts_orc = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
-cont_sing_orc = ["is eating", "is watching", "is reading", "likes", "enjoys", "likes"]
-cont_plur_orc = ["are eating", "are watching", "are reading", "like", "enjoy", "like"]
-
-# WH vocabulary (from generate_simple_datasets/wh.py)
-n1_opts_wh = ["student", "doctor", "pilot", "officer", "athlete", "artist"]
-n2_opts_wh = ["child", "girl", "boy", "patient", "client", "tourist"]
-v_opts_wh = [
-    ("visit", "visited", "visiting"),
-    ("help", "helped", "helping"),
-    ("greet", "greeted", "greeting"),
-    ("follow", "followed", "following"),
-    ("avoid", "avoided", "avoiding"),
-    ("call", "called", "calling"),
-    ("observe", "observed", "observing"),
+# ---------------------------------------------------------------------------
+# ORC vocabulary — verbatim from generate_simple_datasets/orc.py
+# ---------------------------------------------------------------------------
+_n1_opts_orc: List[str] = [
+    "boy", "student", "doctor", "artist", "athlete",
+    "teacher", "lawyer", "farmer", "writer", "cook",
 ]
-adj1_opts_wh = ["young", "tall", "smart", "brave", "kind", "famous"]
-adj2_opts_wh = ["creative", "serious", "friendly", "quiet", "active"]
-adv1_opts_wh = ["probably", "certainly", "possibly", "apparently", "maybe", "perhaps"]
+_n2_opts_orc: List[str] = [
+    "girl", "child", "pilot", "scientist", "engineer",
+    "reporter", "officer", "manager", "dancer", "chef",
+]
+_v_opts_orc: List[Tuple[str, str]] = [
+    ("visits",   "visit"),
+    ("helps",    "help"),
+    ("avoids",   "avoid"),
+    ("follows",  "follow"),
+    ("greets",   "greet"),
+    ("contacts", "contact"),
+    ("guides",   "guide"),
+    ("assists",  "assist"),
+    ("teaches",  "teach"),
+    ("notices",  "notice"),
+]
+_adj1_opts_orc: List[str] = [
+    "", "big", "tall", "young", "strong", "kind",
+    "old", "quiet", "cheerful", "serious",
+]
+_adj2_opts_orc: List[str] = [
+    "", "beautiful", "smart", "brave", "famous", "honest",
+    "wise", "gentle", "curious", "experienced",
+]
+_cont_sing_orc: List[str] = [
+    "is eating",  "is watching",  "is reading",
+    "likes",       "enjoys",
+    "is taking",  "is cooking",   "is playing",  "is practicing",
+]
+_cont_plur_orc: List[str] = [
+    "are eating", "are watching", "are reading",
+    "like",        "enjoy",
+    "are taking", "are cooking",  "are playing", "are practicing",
+]
+
+# ---------------------------------------------------------------------------
+# WH vocabulary — verbatim from generate_simple_datasets/wh.py
+# ---------------------------------------------------------------------------
+_n1_opts_wh: List[str] = [
+    # original 20
+    "student",      "doctor",       "pilot",        "officer",      "athlete",
+    "artist",       "teacher",      "lawyer",        "judge",        "engineer",
+    "scientist",    "nurse",         "chef",          "manager",      "reporter",
+    "banker",       "professor",     "coach",         "captain",      "writer",
+    # 40 additions
+    "accountant",   "architect",    "detective",     "diplomat",     "editor",
+    "firefighter",  "librarian",    "mechanic",      "musician",     "pharmacist",
+    "photographer", "politician",   "programmer",    "psychologist", "surgeon",
+    "technician",   "therapist",    "veterinarian",  "administrator","inspector",
+    "electrician",  "consultant",   "counselor",     "analyst",      "designer",
+    "director",     "instructor",   "investigator",  "planner",      "producer",
+    "specialist",   "supervisor",   "translator",    "auditor",      "biologist",
+    "chemist",      "economist",    "historian",     "geographer",   "philosopher",
+]  # 60 nouns
+_n2_opts_wh: List[str] = [
+    # original 20
+    "child",        "girl",         "boy",           "patient",      "client",
+    "tourist",      "neighbor",     "guest",          "worker",       "driver",
+    "visitor",      "customer",     "assistant",      "colleague",    "intern",
+    "resident",     "passenger",    "volunteer",      "rookie",       "spectator",
+    # 40 additions
+    "beginner",     "bystander",    "citizen",        "contestant",   "dancer",
+    "employee",     "expert",       "journalist",     "observer",     "pedestrian",
+    "scholar",      "singer",       "soldier",        "stranger",     "participant",
+    "researcher",   "civilian",     "cadet",           "apprentice",   "recruit",
+    "traveler",     "witness",      "refugee",        "activist",     "explorer",
+    "migrant",      "pupil",        "disciple",       "follower",     "trainee",
+    "listener",     "newcomer",     "attendee",       "initiate",     "learner",
+    "mentee",       "delegate",     "guardian",       "correspondent","subordinate",
+]  # 60 nouns
+_v_opts_wh: List[Tuple[str, str, str]] = [
+    # (base, past/pp, progressive)
+    # Non-animate verbs
+    ("visit",     "visited",      "visiting"),
+    ("follow",    "followed",     "following"),
+    ("avoid",     "avoided",      "avoiding"),
+    ("observe",   "observed",     "observing"),
+    ("watch",     "watched",      "watching"),
+    ("teach",     "taught",       "teaching"),
+    ("accompany", "accompanied",  "accompanying"),
+    # Animate-only verbs
+    ("help",      "helped",       "helping"),
+    ("greet",     "greeted",      "greeting"),
+    ("call",      "called",       "calling"),
+    ("guide",     "guided",       "guiding"),
+    ("train",     "trained",      "training"),
+    ("support",   "supported",    "supporting"),
+    ("consult",   "consulted",    "consulting"),
+    ("assist",    "assisted",     "assisting"),
+]  # 15 verbs
+_adj1_opts_wh: List[str] = [
+    "", "young", "tall", "smart", "brave", "kind",
+    "famous", "strong", "busy", "calm", "honest", "proud",
+    "gentle", "fair", "eager", "skilled",
+]  # 16 options
+_adj2_opts_wh: List[str] = [
+    "", "creative", "serious", "friendly", "quiet", "active",
+    "careful", "thoughtful", "diligent", "talented", "ambitious",
+    "capable", "determined", "experienced", "motivated",
+]  # 15 options
+_adv1_opts_wh: List[str] = [
+    "", "probably", "certainly", "possibly", "apparently", "maybe",
+    "perhaps", "clearly", "definitely", "obviously", "surely",
+    "truly", "reportedly",
+]  # 13 options
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+_IRREGULARS = {"child": "children", "man": "men", "woman": "women"}
 
 
 def pluralize_noun(noun: str) -> str:
-    irregulars = {"child": "children", "man": "men", "woman": "women"}
-    return irregulars.get(noun, noun + "s")
+    return _IRREGULARS.get(noun, noun + "s")
 
 
-def _load_model_and_tokenizer(checkpoint: str, device: str):
+def ids_for_text(tokenizer, text: str) -> List[int]:
+    return tokenizer(text, add_special_tokens=False).input_ids
+
+
+def _load_model_and_tokenizer(
+    checkpoint: str, device: str, compile_model: bool = False
+):
     try:
         tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=True)
     except Exception:
-        # some checkpoints don't provide a fast tokenizer or require optional
-        # packages (sentencepiece/tiktoken). fall back to the slow tokenizer.
         tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=False)
     model = AutoModelForCausalLM.from_pretrained(checkpoint)
-    # make sure we have a pad token
     if tokenizer.pad_token_id is None:
         if tokenizer.eos_token_id is not None:
             tokenizer.pad_token = tokenizer.eos_token
             model.resize_token_embeddings(len(tokenizer))
         else:
-            # last resort: set pad token to a new token
             tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
             model.resize_token_embeddings(len(tokenizer))
-
     model.eval()
     model.to(device)
+    if compile_model:
+        model = torch.compile(model)
     return tokenizer, model
 
 
-def _concat_ids(a: List[int], b: List[int]) -> List[int]:
-    return a + b
+# ---------------------------------------------------------------------------
+# KV-cache helpers  (GPU acceleration)
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def _get_context_cache(
+    context_ids: List[int],
+    model,
+    device: str,
+    amp_ctx,
+) -> Tuple:
+    """Run the model on *context_ids* and return (past_key_values, last_log_probs).
+
+    ``last_log_probs`` is the log-softmax distribution over the vocabulary
+    predicting the first token after the context.  Shape: [vocab_size].
+    Computed once per sentence and shared across all candidate groups.
+    """
+    ctx = torch.tensor([context_ids], dtype=torch.long, device=device)
+    with amp_ctx:
+        out = model(input_ids=ctx, use_cache=True)
+    last_lp = torch.nn.functional.log_softmax(
+        out.logits[0, -1, :].float(), dim=-1
+    )  # [vocab_size]
+    return out.past_key_values, last_lp
 
 
+@torch.no_grad()
+def _score_candidates_cached(
+    past_kv,
+    last_lp: torch.Tensor,           # [vocab_size] log-probs for first candidate token
+    ctx_len: int,
+    candidate_ids_list: List[List[int]],
+    tokenizer,
+    model,
+    device: str,
+    amp_ctx,
+    batch_size: int = 64,
+) -> List[Tuple[float, int]]:
+    """Score candidates using a pre-computed KV cache for the context.
+
+    The KV cache is expanded (read-only) to the batch size; the model only
+    processes candidate tokens on each forward pass — not the context.
+    Returns a list of (log_prob_sum, token_count) in candidate order.
+    """
+    results: List[Tuple[float, int]] = []
+
+    for i in range(0, len(candidate_ids_list), batch_size):
+        batch = candidate_ids_list[i : i + batch_size]
+        bsz = len(batch)
+        max_len = max((len(c) for c in batch), default=0)
+
+        if max_len == 0:
+            results.extend((0.0, 0) for _ in batch)
+            continue
+
+        # Padded candidate tensor  [bsz, max_len]
+        input_ids = torch.full(
+            (bsz, max_len), tokenizer.pad_token_id, dtype=torch.long, device=device
+        )
+        # Attention mask covers context (in cache) + new candidate positions
+        attn_mask = torch.zeros(
+            bsz, ctx_len + max_len, dtype=torch.long, device=device
+        )
+        attn_mask[:, :ctx_len] = 1  # context positions always attended
+
+        for j, cand in enumerate(batch):
+            if cand:
+                input_ids[j, : len(cand)] = torch.tensor(
+                    cand, dtype=torch.long, device=device
+                )
+                attn_mask[j, ctx_len : ctx_len + len(cand)] = 1
+
+        # Expand KV cache to batch size (.contiguous() required for batched matmuls)
+        past_kv_batch = tuple(
+            (
+                k.expand(bsz, -1, -1, -1).contiguous(),
+                v.expand(bsz, -1, -1, -1).contiguous(),
+            )
+            for k, v in past_kv
+        )
+
+        with amp_ctx:
+            out = model(
+                input_ids=input_ids,
+                attention_mask=attn_mask,
+                past_key_values=past_kv_batch,
+                use_cache=False,
+            )
+
+        # out.logits[:, t, :] predicts candidate token t+1.
+        # For position 0 we use last_lp (already computed from context).
+        # Build all_lp[:, t, :] = log P(cand[t] | ctx, cand[0..t-1])
+        first_lp = last_lp.unsqueeze(0).unsqueeze(0).expand(bsz, 1, -1)  # [bsz,1,V]
+        rest_lp = torch.nn.functional.log_softmax(
+            out.logits[:, :-1, :].float(), dim=-1
+        )  # [bsz, max_len-1, V]
+        all_lp = torch.cat([first_lp, rest_lp], dim=1)  # [bsz, max_len, V]
+
+        # Gather log-probs for the actual candidate tokens
+        gold_lp = torch.gather(
+            all_lp, 2, input_ids.unsqueeze(-1)
+        ).squeeze(-1)  # [bsz, max_len]
+
+        valid = attn_mask[:, ctx_len:].bool()  # [bsz, max_len]
+        log_sums = (gold_lp * valid.float()).sum(dim=1)   # [bsz]
+        tok_counts = valid.sum(dim=1)                      # [bsz]
+
+        for j in range(bsz):
+            results.append((float(log_sums[j].item()), int(tok_counts[j].item())))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Original batch scorer — kept for backward compatibility
+# (does not use KV caching; re-runs the full context on every forward pass)
+# ---------------------------------------------------------------------------
 def compute_candidates_log_sums(
     context_ids: List[int],
     candidate_ids_list: List[List[int]],
@@ -157,100 +372,104 @@ def compute_candidates_log_sums(
     return results
 
 
+# ---------------------------------------------------------------------------
+# Candidate builders
+# ---------------------------------------------------------------------------
+
 def build_orc_candidates():
-    # NP candidates: "the" + optional adj (from both adj lists) + noun (sing & plur)
-    adj_options = [""] + adj1_opts_orc + adj2_opts_orc
-    nouns = list(n1_opts_orc) + list(n2_opts_orc)
-    np_candidates = []
+    """Return (np_candidates, vp_candidates, q_candidate) for ORC evaluation.
+
+    NP (760 candidates): "the [adj] noun" — both adj lists (non-empty entries)
+      crossed with all N1/N2 nouns in singular and plural form.
+    VP (18 candidates): verb-only forms from CONT_SING + CONT_PLUR (no objects).
+    Q:  ["?"]
+    """
+    adj_options = (
+        [""]
+        + [a for a in _adj1_opts_orc if a]
+        + [a for a in _adj2_opts_orc if a]
+    )
+    nouns = list(_n1_opts_orc) + list(_n2_opts_orc)
+    np_candidates: List[str] = []
     for adj in adj_options:
         for n in nouns:
-            for noun_variant in (n, pluralize_noun(n)):
-                if adj:
-                    np_candidates.append(f"the {adj} {noun_variant}")
-                else:
-                    np_candidates.append(f"the {noun_variant}")
-
-    # VP candidates: use the continuations used by the generator
-    vp_candidates = list(cont_sing_orc) + list(cont_plur_orc)
-
-    # question mark candidate
-    q_candidate = ["?"]
-
-    return np_candidates, vp_candidates, q_candidate
+            for form in (n, pluralize_noun(n)):
+                np_candidates.append(
+                    f"the {adj} {form}" if adj else f"the {form}"
+                )
+    vp_candidates = list(_cont_sing_orc) + list(_cont_plur_orc)
+    return np_candidates, vp_candidates, ["?"]
 
 
 def build_wh_candidates():
-    adj_options = [""] + adj1_opts_wh + adj2_opts_wh
-    nouns = list(n1_opts_wh) + list(n2_opts_wh)
-    np_candidates = []
+    """Return (np_candidates, vp_candidates, q_candidate) for WH evaluation.
+
+    NP (7200 candidates): "the [adj] noun" — both adj lists crossed with all
+      N1/N2 nouns (60 each) in singular and plural form.
+    VP (~120 candidates): aux x verb-form combinations from wh.py's v_opts.
+    Q:  ["?"]
+    """
+    adj_options = (
+        [""]
+        + [a for a in _adj1_opts_wh if a]
+        + [a for a in _adj2_opts_wh if a]
+    )
+    nouns = list(_n1_opts_wh) + list(_n2_opts_wh)
+    np_candidates: List[str] = []
     for adj in adj_options:
         for n in nouns:
-            for noun_variant in (n, pluralize_noun(n)):
-                if adj:
-                    np_candidates.append(f"the {adj} {noun_variant}")
-                else:
-                    np_candidates.append(f"the {noun_variant}")
-
-    # VP candidates: combine auxiliaries and verb forms from the generator
-    vp_candidates = []
-    for base, past, ing in v_opts_wh:
-        vp_candidates.extend([base, past, ing, f"did {base}", f"does {base}", f"do {base}", f"is {ing}", f"are {ing}"])
-    # deduplicate while preserving order
-    seen = set()
+            for form in (n, pluralize_noun(n)):
+                np_candidates.append(
+                    f"the {adj} {form}" if adj else f"the {form}"
+                )
+    vp_candidates: List[str] = []
+    for base, past, ing in _v_opts_wh:
+        vp_candidates.extend([
+            base, past, ing,
+            f"did {base}", f"does {base}", f"do {base}",
+            f"is {ing}", f"are {ing}",
+        ])
+    seen: set = set()
     vp_candidates = [x for x in vp_candidates if not (x in seen or seen.add(x))]
+    return np_candidates, vp_candidates, ["?"]
 
-    q_candidate = ["?"]
-    return np_candidates, vp_candidates, q_candidate
 
+# ---------------------------------------------------------------------------
+# Context extractors
+# ---------------------------------------------------------------------------
 
 def find_orc_context(sentence: str) -> str:
-    """Return substring up to and including the first verb (based on v_opts_orc).
-    If no verb is found, return the whole sentence as a fallback.
-    """
+    """Return the sentence up to and including the first ORC verb form."""
     lower = sentence.lower()
-    verb_forms = set()
-    for sing, base in v_opts_orc:
-        verb_forms.add(sing)
-        verb_forms.add(base)
+    verb_forms = {vf for sing, base in _v_opts_orc for vf in (sing, base)}
 
-    earliest = None
-    match_end = None
+    earliest: Optional[int] = None
+    match_end: Optional[int] = None
     for vf in verb_forms:
         m = re.search(r"\b" + re.escape(vf) + r"\b", lower)
-        if m:
-            if earliest is None or m.start() < earliest:
-                earliest = m.start()
-                match_end = m.end()
+        if m and (earliest is None or m.start() < earliest):
+            earliest = m.start()
+            match_end = m.end()
 
-    if earliest is None:
-        # fallback: use first verb-like token (very unlikely for generated data)
-        return sentence.strip()
-    return sentence[:match_end].rstrip()
+    return sentence[:match_end].rstrip() if earliest is not None else sentence.strip()
 
 
 def find_wh_context(sentence: str) -> str:
-    # context is everything before the final '?'
+    """Return everything before the final '?' (the pre-gap context)."""
     pos = sentence.rfind("?")
-    if pos == -1:
-        return sentence.strip()
-    return sentence[:pos].rstrip()
+    return sentence[:pos].rstrip() if pos != -1 else sentence.strip()
 
 
-def ids_for_text(tokenizer, text: str) -> List[int]:
-    return tokenizer(text, add_special_tokens=False).input_ids
+# ---------------------------------------------------------------------------
+# High-level API (kept for external callers)
+# ---------------------------------------------------------------------------
 
-
-def build_vocabulary():
-    """Return a dict with prebuilt candidate lists for ORC and WH evaluations.
-
-    The callback expects build_vocabulary()["orc"] and build_vocabulary()["wh"]
-    to be passed to `process_dataset()`.
-    """
+def build_vocabulary() -> dict:
     orc_np, orc_vp, orc_q = build_orc_candidates()
-    wh_np, wh_vp, wh_q = build_wh_candidates()
+    wh_np,  wh_vp,  wh_q  = build_wh_candidates()
     return {
         "orc": {"np": orc_np, "vp": orc_vp, "q": orc_q},
-        "wh":  {"np": wh_np,  "vp": wh_vp,  "q":  wh_q},
+        "wh":  {"np": wh_np,  "vp": wh_vp,  "q": wh_q},
     }
 
 
@@ -262,6 +481,68 @@ def get_wh_context(sentence: str) -> str:
     return find_wh_context(sentence)
 
 
+# ---------------------------------------------------------------------------
+# Per-sentence evaluation (KV-cache accelerated)
+# ---------------------------------------------------------------------------
+
+def _eval_sentence_cached(
+    sent: str,
+    context_fn,
+    np_ids: List[List[int]],
+    vp_ids: List[List[int]],
+    q_ids: List[List[int]],
+    tokenizer,
+    model,
+    device: str,
+    amp_ctx,
+    batch_size: int,
+) -> dict:
+    """Score one sentence; return a result dict.
+
+    The context is processed exactly once via _get_context_cache; the
+    resulting KV cache is reused for all three candidate groups (NP, VP, ?).
+    """
+    context = context_fn(sent)
+    context_ids = ids_for_text(tokenizer, context.rstrip() + " ")
+    ctx_len = len(context_ids)
+
+    ctx_kv, ctx_lp = _get_context_cache(context_ids, model, device, amp_ctx)
+
+    # NP
+    np_results = _score_candidates_cached(
+        ctx_kv, ctx_lp, ctx_len, np_ids, tokenizer, model, device, amp_ctx, batch_size
+    )
+    np_geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in np_results]
+    np_mass = sum(np_geom) / len(np_geom) if np_geom else 0.0
+
+    # VP
+    vp_results = _score_candidates_cached(
+        ctx_kv, ctx_lp, ctx_len, vp_ids, tokenizer, model, device, amp_ctx, batch_size
+    )
+    vp_geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in vp_results]
+    vp_mass = sum(vp_geom) / len(vp_geom) if vp_geom else 0.0
+
+    # Question mark
+    q_result = _score_candidates_cached(
+        ctx_kv, ctx_lp, ctx_len, q_ids, tokenizer, model, device, amp_ctx, batch_size=1
+    )
+    q_geom = math.exp(q_result[0][0] / q_result[0][1]) if q_result[0][1] > 0 else 0.0
+
+    return {
+        "sentence": sent,
+        "context":  context,
+        "np_mass":  float(np_mass),
+        "vp_mass":  float(vp_mass),
+        "q_mass":   float(q_geom),
+        "np_count": len(np_ids),
+        "vp_count": len(vp_ids),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public evaluation functions
+# ---------------------------------------------------------------------------
+
 def process_dataset(
     file_path: str,
     model,
@@ -269,125 +550,59 @@ def process_dataset(
     vocab: dict,
     context_fn,
     batch_size: int = 64,
-    sent_limit: int = None,
+    sent_limit: Optional[int] = None,
+    amp: bool = False,
 ) -> dict:
-    """Process a test file and return aggregated probability-mass for NP/VP/? categories.
+    """Process a test file and return aggregated probability masses for NP/VP/?.
 
     Args:
-        file_path: path to the test file (one sentence per line).
-        model: a pre-loaded HF causal LM (already on the correct device).
-        tokenizer: corresponding tokenizer.
-        vocab: dictionary with keys 'np', 'vp', 'q' containing candidate strings.
-        context_fn: callable(sentence) -> context substring.
-        batch_size: candidate batch size for scoring.
-        sent_limit: optional limit on number of sentences to process.
+        file_path:   path to the test file (one sentence per line).
+        model:       pre-loaded HF causal LM (already on the correct device).
+        tokenizer:   corresponding tokenizer.
+        vocab:       dict with keys 'np', 'vp', 'q' (lists of candidate strings).
+        context_fn:  callable(sentence) -> context substring.
+        batch_size:  candidate batch size for GPU scoring.
+        sent_limit:  optional cap on number of sentences to process.
+        amp:         enable torch.autocast for float16/bfloat16 inference.
 
     Returns:
-        A dict with keys 'NP', 'VP', '?' mapping to mean category masses (floats).
+        Dict with keys 'NP', 'VP', '?' mapping to mean category masses.
     """
-    # determine device from model
     try:
-        device = next(model.parameters()).device
+        device = str(next(model.parameters()).device)
     except Exception:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # read sentences
+    device_type = "cuda" if "cuda" in device else "cpu"
+    amp_ctx = (
+        torch.autocast(device_type=device_type)
+        if amp and device_type == "cuda"
+        else nullcontext()
+    )
+
+    np_ids = [ids_for_text(tokenizer, c) for c in vocab["np"]]
+    vp_ids = [ids_for_text(tokenizer, c) for c in vocab["vp"]]
+    q_ids  = [ids_for_text(tokenizer, c) for c in vocab["q"]]
+
     with open(file_path, "r", encoding="utf-8") as f:
         lines = [l.strip() for l in f if l.strip()]
     if sent_limit:
         lines = lines[:sent_limit]
 
     rows = []
-    for i, sent in enumerate(lines):
-        context = context_fn(sent)
-        context_for_tok = context.rstrip()
-        context_ids = ids_for_text(tokenizer, context_for_tok + " ")
+    for sent in lines:
+        r = _eval_sentence_cached(
+            sent, context_fn, np_ids, vp_ids, q_ids,
+            tokenizer, model, device, amp_ctx, batch_size,
+        )
+        r["file"] = file_path
+        r["idx"]  = len(rows)
+        rows.append(r)
 
-        # NP category: compute prefix "the" once when useful
-        prefix = "the"
-        prefix_ids = ids_for_text(tokenizer, prefix)
+    def _mean(key: str) -> float:
+        return sum(x[key] for x in rows) / len(rows) if rows else 0.0
 
-        # pre-tokenize candidates from the provided vocab
-        np_ids = [ids_for_text(tokenizer, c) for c in vocab["np"]]
-        vp_ids = [ids_for_text(tokenizer, c) for c in vocab["vp"]]
-        q_ids = [ids_for_text(tokenizer, c) for c in vocab["q"]]
-
-        # compute prefix log once
-        prefix_log, prefix_toks = compute_candidates_log_sums(context_ids, [prefix_ids], tokenizer, model, device, batch_size=batch_size)[0]
-
-        # group NP candidates that start with prefix
-        rest_ids_for_np = []
-        rest_map_idx = []
-        fallback_full_np = []
-        fallback_full_idx = []
-        for idx, cids in enumerate(np_ids):
-            if len(cids) >= len(prefix_ids) and cids[: len(prefix_ids)] == prefix_ids:
-                rest = cids[len(prefix_ids) :]
-                rest_ids_for_np.append(rest)
-                rest_map_idx.append(idx)
-            else:
-                fallback_full_np.append(cids)
-                fallback_full_idx.append(idx)
-
-        # compute rest log-probs conditioned on context+prefix
-        new_ctx_ids = context_ids + prefix_ids
-        rest_results = []
-        if rest_ids_for_np:
-            rest_results = compute_candidates_log_sums(new_ctx_ids, rest_ids_for_np, tokenizer, model, device, batch_size=batch_size)
-
-        np_geom_vals = [0.0] * len(np_ids)
-        for k, (logsum_rest, count_rest) in enumerate(rest_results):
-            orig_idx = rest_map_idx[k]
-            total_log = prefix_log + logsum_rest
-            total_tok_count = prefix_toks + count_rest
-            if total_tok_count <= 0:
-                geom = 0.0
-            else:
-                geom = math.exp(total_log / float(total_tok_count))
-            np_geom_vals[orig_idx] = geom
-
-        # handle fallback full NP computations
-        if fallback_full_np:
-            fallback_results = compute_candidates_log_sums(context_ids, fallback_full_np, tokenizer, model, device, batch_size=batch_size)
-            for k, (logsum_full, count_full) in enumerate(fallback_results):
-                orig_idx = fallback_full_idx[k]
-                geom = math.exp(logsum_full / float(count_full)) if count_full > 0 else 0.0
-                np_geom_vals[orig_idx] = geom
-
-        np_mass = float(sum(np_geom_vals) / len(np_geom_vals)) if np_geom_vals else 0.0
-
-        # VP category
-        vp_results = compute_candidates_log_sums(context_ids, vp_ids, tokenizer, model, device, batch_size=batch_size)
-        vp_geom = []
-        for logsum, cnt in vp_results:
-            if cnt > 0:
-                vp_geom.append(math.exp(logsum / float(cnt)))
-            else:
-                vp_geom.append(0.0)
-        vp_mass = float(sum(vp_geom) / len(vp_geom)) if vp_geom else 0.0
-
-        # question mark candidate
-        q_result = compute_candidates_log_sums(context_ids, q_ids, tokenizer, model, device, batch_size=1)[0]
-        q_geom = math.exp(q_result[0] / float(q_result[1])) if q_result[1] > 0 else 0.0
-
-        rows.append({
-            "file": file_path,
-            "idx": i,
-            "sentence": sent,
-            "context": context,
-            "np_mass": np_mass,
-            "vp_mass": vp_mass,
-            "q_mass": q_geom,
-            "np_count": len(np_ids),
-            "vp_count": len(vp_ids),
-        })
-
-    # aggregate
-    def _mean(l, key):
-        return sum(x[key] for x in l) / len(l) if l else 0.0
-
-    result = {"NP": _mean(rows, "np_mass"), "VP": _mean(rows, "vp_mass"), "?": _mean(rows, "q_mass")}
-    return result
+    return {"NP": _mean("np_mass"), "VP": _mean("vp_mass"), "?": _mean("q_mass")}
 
 
 def evaluate_sentences(
@@ -397,154 +612,106 @@ def evaluate_sentences(
     model,
     device: str,
     out_rows: List[dict],
-    sent_limit: int = None,
+    sent_limit: Optional[int] = None,
     cand_batch_size: int = 64,
-):
+    amp: bool = False,
+) -> None:
+    """Evaluate all sentences in *filename* (domain='orc' or 'wh').
+
+    Results are appended to *out_rows* as dicts with keys:
+    file, idx, sentence, context, np_mass, vp_mass, q_mass, np_count, vp_count.
+    """
     if domain == "orc":
         np_cands, vp_cands, q_cand = build_orc_candidates()
+        context_fn = find_orc_context
     else:
         np_cands, vp_cands, q_cand = build_wh_candidates()
+        context_fn = find_wh_context
+
+    device_type = "cuda" if "cuda" in device else "cpu"
+    amp_ctx = (
+        torch.autocast(device_type=device_type)
+        if amp and device_type == "cuda"
+        else nullcontext()
+    )
+
+    # Pre-tokenize candidates once (shared across all sentences)
+    np_ids = [ids_for_text(tokenizer, c) for c in np_cands]
+    vp_ids = [ids_for_text(tokenizer, c) for c in vp_cands]
+    q_ids  = [ids_for_text(tokenizer, c) for c in q_cand]
 
     with open(filename, "r", encoding="utf-8") as f:
         lines = [l.strip() for l in f if l.strip()]
-
     if sent_limit:
         lines = lines[:sent_limit]
 
     for i, sent in enumerate(tqdm.tqdm(lines, desc=f"Eval {domain}")):
-        if domain == "orc":
-            context = find_orc_context(sent)
-        else:
-            context = find_wh_context(sent)
-
-        # ensure one separating space when we append candidates
-        context_for_tok = context.rstrip()
-
-        # compute token ids for context
-        context_ids = ids_for_text(tokenizer, context_for_tok + " ")
-
-        # --- NP category: optimize by computing prefix "the" once ---
-        prefix = "the"
-        prefix_ids = ids_for_text(tokenizer, prefix)
-
-        # pre-tokenize candidates
-        np_ids = [ids_for_text(tokenizer, c) for c in np_cands]
-        vp_ids = [ids_for_text(tokenizer, c) for c in vp_cands]
-        q_ids = [ids_for_text(tokenizer, c) for c in q_cand]
-
-        # compute prefix log once
-        prefix_log, prefix_toks = compute_candidates_log_sums(context_ids, [prefix_ids], tokenizer, model, device, batch_size=cand_batch_size)[0]
-
-        # group NP candidates that actually start with prefix_ids
-        rest_ids_for_np = []
-        rest_map_idx = []  # map back index
-        fallback_full_np = []  # those that do not start with prefix -- compute as full
-        fallback_full_idx = []
-        for idx, cids in enumerate(np_ids):
-            if len(cids) >= len(prefix_ids) and cids[: len(prefix_ids)] == prefix_ids:
-                rest = cids[len(prefix_ids) :]
-                rest_ids_for_np.append(rest)
-                rest_map_idx.append(idx)
-            else:
-                fallback_full_np.append(cids)
-                fallback_full_idx.append(idx)
-
-        # compute rest log-probs conditioned on context+prefix
-        new_ctx_ids = context_ids + prefix_ids
-        rest_results = []
-        if rest_ids_for_np:
-            rest_results = compute_candidates_log_sums(new_ctx_ids, rest_ids_for_np, tokenizer, model, device, batch_size=cand_batch_size)
-
-        # fill NP candidate stats
-        np_geom_vals = [0.0] * len(np_cands)
-
-        # handle prefix-starting ones
-        for k, (logsum_rest, count_rest) in enumerate(rest_results):
-            orig_idx = rest_map_idx[k]
-            total_log = prefix_log + logsum_rest
-            total_tok_count = prefix_toks + count_rest
-            if total_tok_count <= 0:
-                geom = 0.0
-            else:
-                geom = math.exp(total_log / float(total_tok_count))
-            np_geom_vals[orig_idx] = geom
-
-        # handle fallback full NP computations
-        if fallback_full_np:
-            fallback_results = compute_candidates_log_sums(context_ids, fallback_full_np, tokenizer, model, device, batch_size=cand_batch_size)
-            for k, (logsum_full, count_full) in enumerate(fallback_results):
-                orig_idx = fallback_full_idx[k]
-                geom = math.exp(logsum_full / float(count_full)) if count_full > 0 else 0.0
-                np_geom_vals[orig_idx] = geom
-
-        # NP category mass = mean of per-candidate geometric-means
-        np_mass = float(sum(np_geom_vals) / len(np_geom_vals)) if np_geom_vals else 0.0
-
-        # --- VP category: compute directly in batches ---
-        vp_results = compute_candidates_log_sums(context_ids, vp_ids, tokenizer, model, device, batch_size=cand_batch_size)
-        vp_geom = []
-        for logsum, cnt in vp_results:
-            if cnt > 0:
-                vp_geom.append(math.exp(logsum / float(cnt)))
-            else:
-                vp_geom.append(0.0)
-        vp_mass = float(sum(vp_geom) / len(vp_geom)) if vp_geom else 0.0
-
-        # --- question mark candidate ---
-        q_result = compute_candidates_log_sums(context_ids, q_ids, tokenizer, model, device, batch_size=1)[0]
-        q_geom = math.exp(q_result[0] / float(q_result[1])) if q_result[1] > 0 else 0.0
-
-        out_rows.append(
-            {
-                "file": filename,
-                "idx": i,
-                "sentence": sent,
-                "context": context,
-                "np_mass": np_mass,
-                "vp_mass": vp_mass,
-                "q_mass": q_geom,
-                "np_count": len(np_cands),
-                "vp_count": len(vp_cands),
-            }
+        r = _eval_sentence_cached(
+            sent, context_fn, np_ids, vp_ids, q_ids,
+            tokenizer, model, device, amp_ctx, cand_batch_size,
         )
+        r["file"] = filename
+        r["idx"]  = i
+        out_rows.append(r)
 
 
-def main():
-    p = argparse.ArgumentParser()
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description="Evaluate probability masses at ORC/WH gap sites.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     p.add_argument("--checkpoint", required=True, help="HF model id or path")
-    p.add_argument("--orc_test", required=True, help="Path to ORC test set (one sent per line)")
-    p.add_argument("--wh_test", required=True, help="Path to WH test set (one sent per line)")
-    p.add_argument("--out", default="prob_masses_results.csv", help="CSV output file")
-    p.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
-    p.add_argument("--sent_limit", type=int, default=None, help="Limit number of sentences per file (for debugging)")
-    p.add_argument("--cand_batch_size", type=int, default=64, help="Batch size for candidate evaluation")
+    p.add_argument("--orc_test",   required=True, help="ORC test set (one sent/line)")
+    p.add_argument("--wh_test",    required=True, help="WH test set (one sent/line)")
+    p.add_argument("--out", default="prob_masses_results.csv", help="CSV output path")
+    p.add_argument("--device",     default=None,
+                   help="torch device, e.g. cpu or cuda (auto-detected if omitted)")
+    p.add_argument("--sent_limit", type=int, default=None,
+                   help="Cap sentences per file (for debugging)")
+    p.add_argument("--cand_batch_size", type=int, default=64,
+                   help="Candidate batch size; increase for more GPU throughput")
+    p.add_argument("--amp", action="store_true",
+                   help="Enable torch.autocast (float16/bf16) on CUDA — ~2x faster")
+    p.add_argument("--compile", action="store_true",
+                   help="torch.compile the model (PyTorch >= 2.0) — ~1.5-2x after warm-up")
     args = p.parse_args()
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer, model = _load_model_and_tokenizer(args.checkpoint, device)
+    tokenizer, model = _load_model_and_tokenizer(
+        args.checkpoint, device, compile_model=args.compile
+    )
 
     rows: List[dict] = []
-    evaluate_sentences(args.orc_test, "orc", tokenizer, model, device, rows, sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size)
-    evaluate_sentences(args.wh_test, "wh", tokenizer, model, device, rows, sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size)
+    evaluate_sentences(
+        args.orc_test, "orc", tokenizer, model, device, rows,
+        sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size, amp=args.amp,
+    )
+    evaluate_sentences(
+        args.wh_test, "wh", tokenizer, model, device, rows,
+        sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size, amp=args.amp,
+    )
 
-    # write CSV
-    fieldnames = ["file", "idx", "sentence", "context", "np_mass", "vp_mass", "q_mass", "np_count", "vp_count"]
+    fieldnames = [
+        "file", "idx", "sentence", "context",
+        "np_mass", "vp_mass", "q_mass", "np_count", "vp_count",
+    ]
     with open(args.out, "w", encoding="utf-8", newline="") as out_f:
         writer = csv.DictWriter(out_f, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
             writer.writerow(r)
 
-    # print a short aggregate summary
     orc_rows = [r for r in rows if r["file"] == args.orc_test]
-    wh_rows = [r for r in rows if r["file"] == args.wh_test]
+    wh_rows  = [r for r in rows if r["file"] == args.wh_test]
 
-    def mean(l, key):
-        return sum(x[key] for x in l) / len(l) if l else 0.0
+    def mean(lst: List[dict], key: str) -> float:
+        return sum(x[key] for x in lst) / len(lst) if lst else 0.0
 
     print("Saved results to:", args.out)
-    print("ORC avg masses: NP=%.6f VP=%.6f Q=%.6f" % (mean(orc_rows, "np_mass"), mean(orc_rows, "vp_mass"), mean(orc_rows, "q_mass")))
-    print("WH  avg masses: NP=%.6f VP=%.6f Q=%.6f" % (mean(wh_rows, "np_mass"), mean(wh_rows, "vp_mass"), mean(wh_rows, "q_mass")))
+    print("ORC avg masses: NP=%.6f  VP=%.6f  Q=%.6f" % (
+        mean(orc_rows, "np_mass"), mean(orc_rows, "vp_mass"), mean(orc_rows, "q_mass")))
+    print("WH  avg masses: NP=%.6f  VP=%.6f  Q=%.6f" % (
+        mean(wh_rows,  "np_mass"), mean(wh_rows,  "vp_mass"), mean(wh_rows,  "q_mass")))
 
 
 if __name__ == "__main__":
