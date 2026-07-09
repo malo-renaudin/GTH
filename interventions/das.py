@@ -1,30 +1,18 @@
 """
-Thin experiment wrapper around CausalGym / pyvene for a DAS sweep over
-(layer, position) pairs.
+DAS experiment: thin wrapper around pyvene's LowRankRotatedSpaceIntervention.
+Sweeps over (layer, position_label) pairs.
 
-DAS itself (the rotated low-rank subspace intervention, its optimization,
-and the intervenable forward pass) is entirely provided by pyvene via
-`LowRankRotatedSpaceIntervention` + `IntervenableModel`. This script only
-adds: dataframe loading, tokenization, a selected-position CE training
-loop, ODDS evaluation, and result/checkpoint saving.
+CSV columns expected:
+    quadruplet_id, position_label, base_text, source_text,
+    yb, ys, base_anchor, source_anchor
 
-Assumptions made explicit here (adjust if your CausalGym fork differs):
-
-  * `--positions` is the outer sweep grid (paired with `--layers`), so for
-    each sweep cell the same position is applied to every example, i.e. it
-    overrides the per-row `base_position` / `source_position` columns in
-    the dataframes for that (layer, position) run. If you'd rather keep
-    per-row positions and only sweep layers, drop the position-override
-    lines below and iterate `args.positions` as a no-op label instead.
-  * `yb` / `ys` are single-token targets: we take the first BPE token of
-    `" " + str(target)` under the tokenizer.
-  * ODDS is computed at the same token positions as `--loss-positions`
-    and averaged over them (the task spec does not define a separate
-    eval position), in addition to being averaged over examples.
+Token positions are resolved dynamically from the anchor strings using offset
+mappings, so the CSV is tokenizer-agnostic.
 """
 
 import argparse
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -33,14 +21,17 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-import pyvene as pv
 from pyvene import (
     IntervenableConfig,
     IntervenableModel,
-    RepresentationConfig,
     LowRankRotatedSpaceIntervention,
+    RepresentationConfig,
 )
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -49,8 +40,8 @@ def parse_args():
     p.add_argument("--train-df", required=True)
     p.add_argument("--eval-df", required=True)
     p.add_argument("--layers", nargs="+", type=int, required=True)
-    p.add_argument("--positions", nargs="+", type=int, required=True)
-    p.add_argument("--loss-positions", nargs="+", type=int, required=True)
+    p.add_argument("--loss-positions", nargs="+", type=int, required=True,
+                   help="token indices (in the base sentence) where CE / ODDS are computed")
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--lr", type=float, default=1e-3)
@@ -58,20 +49,85 @@ def parse_args():
     return p.parse_args()
 
 
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
+
 def load_model(checkpoint, device):
     tokenizer = AutoTokenizer.from_pretrained(checkpoint)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(checkpoint).to(device).eval()
-    for param in model.parameters():
-        param.requires_grad_(False)
+    for p in model.parameters():
+        p.requires_grad_(False)
     return model, tokenizer
 
 
-def target_token_id(tokenizer, target):
-    ids = tokenizer.encode(" " + str(target).strip(), add_special_tokens=False)
-    return ids[0]
+# ---------------------------------------------------------------------------
+# Token position resolution (anchor-based, robust)
+# ---------------------------------------------------------------------------
 
+def find_token_position(tokenizer, text, anchor):
+    """Return the token index whose offset overlaps the first unambiguous
+    whole-word occurrence of `anchor` in `text`.
+    Raises ValueError if ambiguous after deduplication.
+    Prints a warning and returns None if not found.
+    """
+    enc = tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
+    offsets = enc["offset_mapping"]
+
+    pattern = r"(?<!\w)" + re.escape(str(anchor)) + r"(?!\w)"
+    char_spans = [(m.start(), m.end()) for m in re.finditer(pattern, text)]
+
+    if not char_spans:
+        print(f"WARNING: anchor '{anchor}' not found in: {text!r}")
+        return None
+
+    candidates = []
+    for char_start, char_end in char_spans:
+        for i, (s, e) in enumerate(offsets):
+            if s < char_end and e > char_start:
+                candidates.append(i)
+                break
+
+    unique = list(dict.fromkeys(candidates))
+    if len(unique) > 1:
+        raise ValueError(
+            f"Anchor '{anchor}' is ambiguous in {text!r} — "
+            f"maps to token positions {unique}"
+        )
+    if not unique:
+        print(f"WARNING: anchor '{anchor}' found in text but maps to no token: {text!r}")
+        return None
+    return unique[0]
+
+
+# ---------------------------------------------------------------------------
+# Target tokenization (multi-token)
+# ---------------------------------------------------------------------------
+
+def tokenize_targets(tokenizer, target, device):
+    """Return a 1D tensor of token IDs for `target` (prefixed with a space)."""
+    ids = tokenizer.encode(" " + str(target).strip(), add_special_tokens=False)
+    return torch.tensor(ids, device=device)
+
+
+def sequence_log_prob(logits, target_ids):
+    """Sum of log-probs for target_ids using the last len(target_ids) positions.
+
+    logits     : (1, seq_len, vocab)
+    target_ids : (n,)
+    Returns a scalar tensor.
+    """
+    n = len(target_ids)
+    # position p predicts the token at p+1; use last n positions as window
+    logp = F.log_softmax(logits[0, -n - 1:-1, :], dim=-1)  # (n, V)
+    return logp[range(n), target_ids].sum()
+
+
+# ---------------------------------------------------------------------------
+# pyvene helpers
+# ---------------------------------------------------------------------------
 
 def make_intervenable(model, layer, device):
     config = IntervenableConfig(
@@ -93,12 +149,11 @@ def make_intervenable(model, layer, device):
     return intervenable
 
 
-def build_unit_locations(base_pos, source_pos):
-    # single intervention (one representation) -> outer list of length 1
+def build_unit_locations(base_positions, source_positions):
     return {
         "sources->base": (
-            [[[int(p)] for p in source_pos]],
-            [[[int(p)] for p in base_pos]],
+            [[[int(p)] for p in source_positions]],
+            [[[int(p)] for p in base_positions]],
         )
     }
 
@@ -107,28 +162,52 @@ def tokenize_batch(tokenizer, texts, device):
     return tokenizer(texts, return_tensors="pt", padding=True).to(device)
 
 
+def resolve_positions(tokenizer, texts, anchors):
+    return [find_token_position(tokenizer, t, a) for t, a in zip(texts, anchors)]
+
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+
 def train_intervention(intervenable, tokenizer, train_df, loss_positions,
-                        epochs, batch_size, lr, device):
+                       epochs, batch_size, lr, device):
     optimizer = torch.optim.Adam(intervenable.get_trainable_parameters(), lr=lr)
     losses = []
     for epoch in range(epochs):
         df = train_df.sample(frac=1).reset_index(drop=True)
         for start in tqdm(range(0, len(df), batch_size), desc=f"train epoch {epoch}"):
             batch = df.iloc[start:start + batch_size]
-            base = tokenize_batch(tokenizer, batch["base_text"].tolist(), device)
-            source = tokenize_batch(tokenizer, batch["source_text"].tolist(), device)
+
+            base_pos = resolve_positions(tokenizer,
+                                         batch["base_text"].tolist(),
+                                         batch["base_anchor"].tolist())
+            src_pos = resolve_positions(tokenizer,
+                                        batch["source_text"].tolist(),
+                                        batch["source_anchor"].tolist())
+            valid = [i for i, (b, s) in enumerate(zip(base_pos, src_pos))
+                     if b is not None and s is not None]
+            if not valid:
+                continue
+
+            base_enc = tokenize_batch(tokenizer, [batch.iloc[i]["base_text"] for i in valid], device)
+            src_enc = tokenize_batch(tokenizer, [batch.iloc[i]["source_text"] for i in valid], device)
             unit_locations = build_unit_locations(
-                batch["base_position"].tolist(), batch["source_position"].tolist()
-            )
-            target_ids = torch.tensor(
-                [target_token_id(tokenizer, y) for y in batch["ys"]], device=device
+                [base_pos[i] for i in valid], [src_pos[i] for i in valid]
             )
 
-            _, cf_outputs = intervenable(base, [source], unit_locations=unit_locations)
-            logits = cf_outputs.logits
+            _, cf_outputs = intervenable(base_enc, [src_enc], unit_locations=unit_locations)
+            logits = cf_outputs.logits  # (B, seq, vocab)
 
+            # CE at each loss_position, first token of ys as target.
+            ys_first = torch.tensor(
+                [tokenize_targets(tokenizer, batch.iloc[i]["ys"], device)[0].item()
+                 for i in valid],
+                device=device,
+            )
             loss = sum(
-                F.cross_entropy(logits[:, pos, :], target_ids) for pos in loss_positions
+                F.cross_entropy(logits[:, pos, :], ys_first)
+                for pos in loss_positions
             ) / len(loss_positions)
 
             optimizer.zero_grad()
@@ -137,46 +216,60 @@ def train_intervention(intervenable, tokenizer, train_df, loss_positions,
             losses.append(loss.item())
 
     tail = losses[-max(1, len(losses) // 10):]
-    return float(np.mean(tail))
+    return float(np.mean(tail)) if tail else float("nan")
 
+
+# ---------------------------------------------------------------------------
+# Evaluation (ODDS over full target strings)
+# ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def evaluate(intervenable, base_model, tokenizer, eval_df, loss_positions,
-             batch_size, device):
+def evaluate_odds(intervenable, base_model, tokenizer, eval_df, batch_size, device):
     odds_all = []
     for start in tqdm(range(0, len(eval_df), batch_size), desc="eval"):
         batch = eval_df.iloc[start:start + batch_size]
-        base = tokenize_batch(tokenizer, batch["base_text"].tolist(), device)
-        source = tokenize_batch(tokenizer, batch["source_text"].tolist(), device)
+
+        base_pos = resolve_positions(tokenizer,
+                                     batch["base_text"].tolist(),
+                                     batch["base_anchor"].tolist())
+        src_pos = resolve_positions(tokenizer,
+                                    batch["source_text"].tolist(),
+                                    batch["source_anchor"].tolist())
+        valid = [i for i, (b, s) in enumerate(zip(base_pos, src_pos))
+                 if b is not None and s is not None]
+        if not valid:
+            continue
+
+        base_enc = tokenize_batch(tokenizer, [batch.iloc[i]["base_text"] for i in valid], device)
+        src_enc = tokenize_batch(tokenizer, [batch.iloc[i]["source_text"] for i in valid], device)
         unit_locations = build_unit_locations(
-            batch["base_position"].tolist(), batch["source_position"].tolist()
+            [base_pos[i] for i in valid], [src_pos[i] for i in valid]
         )
 
-        yb_ids = torch.tensor(
-            [target_token_id(tokenizer, y) for y in batch["yb"]], device=device
-        )
-        ys_ids = torch.tensor(
-            [target_token_id(tokenizer, y) for y in batch["ys"]], device=device
-        )
-
-        base_logits = base_model(**base).logits
-        _, cf_outputs = intervenable(base, [source], unit_locations=unit_locations)
+        base_logits = base_model(**base_enc).logits
+        _, cf_outputs = intervenable(base_enc, [src_enc], unit_locations=unit_locations)
         int_logits = cf_outputs.logits
 
-        for pos in loss_positions:
-            base_logp = F.log_softmax(base_logits[:, pos, :], dim=-1)
-            int_logp = F.log_softmax(int_logits[:, pos, :], dim=-1)
+        for j, idx in enumerate(valid):
+            row = batch.iloc[idx]
+            yb_ids = tokenize_targets(tokenizer, row["yb"], device)
+            ys_ids = tokenize_targets(tokenizer, row["ys"], device)
 
-            log_p_yb_base = base_logp.gather(1, yb_ids[:, None]).squeeze(1)
-            log_p_ys_base = base_logp.gather(1, ys_ids[:, None]).squeeze(1)
-            log_p_yb_int = int_logp.gather(1, yb_ids[:, None]).squeeze(1)
-            log_p_ys_int = int_logp.gather(1, ys_ids[:, None]).squeeze(1)
+            log_p_yb_base = sequence_log_prob(base_logits[j:j+1], yb_ids).item()
+            log_p_ys_base = sequence_log_prob(base_logits[j:j+1], ys_ids).item()
+            log_p_ys_int = sequence_log_prob(int_logits[j:j+1], ys_ids).item()
+            log_p_yb_int = sequence_log_prob(int_logits[j:j+1], yb_ids).item()
 
-            odds = (log_p_yb_base - log_p_ys_base) + (log_p_ys_int - log_p_yb_int)
-            odds_all.extend(odds.cpu().tolist())
+            odds_all.append((log_p_yb_base - log_p_ys_base) + (log_p_ys_int - log_p_yb_int))
 
+    if not odds_all:
+        return float("nan"), float("nan")
     return float(np.mean(odds_all)), float(np.std(odds_all))
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     args = parse_args()
@@ -185,53 +278,52 @@ def main():
     train_model, train_tokenizer = load_model(args.train_checkpoint, device)
     eval_model, eval_tokenizer = load_model(args.eval_checkpoint, device)
 
-    train_df_src = pd.read_csv(args.train_df)
-    eval_df_src = pd.read_csv(args.eval_df)
+    train_df_full = pd.read_csv(args.train_df)
+    eval_df_full = pd.read_csv(args.eval_df)
 
     interventions_dir = os.path.join(args.output_dir, "interventions")
     os.makedirs(interventions_dir, exist_ok=True)
 
     results = []
+    position_labels = train_df_full["position_label"].unique()
+
     for layer in args.layers:
-        for pos in args.positions:
-            print(f"=== layer={layer} position={pos} ===")
+        for label in position_labels:
+            print(f"=== layer={layer}  position_label={label} ===")
 
-            train_df = train_df_src.copy()
-            train_df["base_position"] = pos
-            train_df["source_position"] = pos
-
-            eval_df = eval_df_src.copy()
-            eval_df["base_position"] = pos
-            eval_df["source_position"] = pos
+            tr = train_df_full[train_df_full["position_label"] == label].reset_index(drop=True)
+            ev = eval_df_full[eval_df_full["position_label"] == label].reset_index(drop=True)
 
             intervenable = make_intervenable(train_model, layer, device)
             train_loss = train_intervention(
-                intervenable, train_tokenizer, train_df, args.loss_positions,
+                intervenable, train_tokenizer, tr, args.loss_positions,
                 args.epochs, args.batch_size, args.lr, device,
             )
 
             state_dict = intervenable.state_dict()
-            cell_dir = os.path.join(interventions_dir, f"layer{layer}_pos{pos}")
+            cell_dir = os.path.join(interventions_dir, f"layer{layer}_{label}")
             os.makedirs(cell_dir, exist_ok=True)
             torch.save(state_dict, os.path.join(cell_dir, "state_dict.pt"))
 
             eval_intervenable = make_intervenable(eval_model, layer, device)
             eval_intervenable.load_state_dict(state_dict)
-            odds_mean, odds_std = evaluate(
-                eval_intervenable, eval_model, eval_tokenizer, eval_df,
-                args.loss_positions, args.batch_size, device,
+            odds_mean, odds_std = evaluate_odds(
+                eval_intervenable, eval_model, eval_tokenizer, ev,
+                args.batch_size, device,
             )
 
             results.append({
                 "layer": layer,
-                "position": pos,
+                "position_label": label,
                 "odds_mean": odds_mean,
                 "odds_std": odds_std,
                 "train_loss": train_loss,
             })
+            print(f"  odds_mean={odds_mean:.4f}  odds_std={odds_std:.4f}  train_loss={train_loss:.4f}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     pd.DataFrame(results).to_csv(os.path.join(args.output_dir, "results.csv"), index=False)
+    print("Done. Results saved to", os.path.join(args.output_dir, "results.csv"))
 
 
 if __name__ == "__main__":
