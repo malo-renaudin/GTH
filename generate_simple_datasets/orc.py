@@ -20,6 +20,17 @@ ADVERB_RESTRICTIONS = {
 
 }
 
+PAST_PARTICIPLES = {
+    "visits":  "visited",
+    "helps":   "helped",
+    "avoids":  "avoided",
+    "follows": "followed",
+    "greets":  "greeted",
+}
+
+# Auxiliaries for the active ORC variant (modal / do-support; verb takes base form)
+AUX_LIST = ["", "did ", "could ", "couldn't ", "didn't ", "would ", "wouldn't ", "should ", "shouldn't ", "might "]
+
 def is_valid_verb_adverb_combo(verb, adverb):
     """Check if verb + adverb combination is natural."""
     if verb in ADVERB_RESTRICTIONS:
@@ -37,7 +48,9 @@ def generate_sentence_variants(structure, n1, n2, v1_sing, v1_plur, adj1, adj2, 
         'adv1': [adv1, ""],
         'rel': ["that", "who", ""]
     }
-    
+    if structure == 1:
+        modifiers['aux1'] = AUX_LIST
+
     keys = modifiers.keys()
     combinations = list(itertools.product(*modifiers.values()))
     
@@ -52,13 +65,30 @@ def generate_sentence_variants(structure, n1, n2, v1_sing, v1_plur, adj1, adj2, 
             continue
             
         if structure == 1:
-            s_core = f"The {d['adj1']} {current_n1} {d['rel']} the {d['adj2']} {current_n2} {d['adv1']} {current_v1}"
+            aux1 = d.get('aux1', '')
+            v1_form = v1_plur if aux1 else current_v1  # base form after aux, agreement-based otherwise
+            s_core = f"The {d['adj1']} {current_n1} {d['rel']} the {d['adj2']} {current_n2} {aux1}{d['adv1']} {v1_form}"
         elif structure == 2:
             s_core = f"The {d['adj2']} {current_n2} {d['adv1']} {current_v1} the {d['adj1']} {current_n1}"
         
         clean_core = " ".join(s_core.split()).strip()
         cores.append((clean_core, n1_is_plural, structure))
-        
+
+    # Grammatical passive ORC: "The N1 that was/were [adv] V-pp by the N2"
+    # was/were agrees with n1 (the passive subject); n2 is the "by" agent
+    if structure == 1:
+        v1_pp = PAST_PARTICIPLES.get(v1_sing)
+        if v1_pp:
+            aux_pass = "were " if n1_is_plural else "was "
+            pass_modifiers = {'adj1': [adj1, ""], 'adj2': [adj2, ""], 'adv1': [adv1, ""], 'rel': ["that", "who", ""]}
+            for combo in itertools.product(*pass_modifiers.values()):
+                d = dict(zip(pass_modifiers.keys(), combo))
+                if not is_valid_verb_adverb_combo(v1_sing, d['adv1']):
+                    continue
+                s_core = f"The {d['adj1']} {current_n1} {d['rel']} {aux_pass}{d['adv1']} {v1_pp} by the {d['adj2']} {current_n2}"
+                clean_core = " ".join(s_core.split()).strip()
+                cores.append((clean_core, n1_is_plural, structure))
+
     return cores
 
 def generate_full_corpus(struct, n1_opts, n2_opts, v_opts, adj1_opts, adj2_opts, adv1_opts):
