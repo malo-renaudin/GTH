@@ -9,16 +9,14 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=20:00:00
-#SBATCH --error=results/wh_augmented/error_train_streaming%a.log
-#SBATCH --output=results/wh_augmented/output_train_streaming_%a.log
+#SBATCH --error=results/wh_augmented_full_datasets/error_train_streaming%a.log
+#SBATCH --output=results/wh_augmented_full_datasets/output_train_streaming_%a.log
 
 source $WORK/miniconda3/etc/profile.d/conda.sh
 conda activate litgpt_jz
 
 python scripts/train/streaming_dataset.py \
-   --output-dir results/wh_augmented\
-   --probability-masses-orc datasets/orc_test.txt \
-   --probability-masses-wh  datasets/wh_test.txt \
+   --output-dir results/wh_augmented_full_datasets\
    --blimp-dir eval_data/blimp_data \
    --nested-inner eval_data/short_nested_inner_english.json \
    --nested-outer eval_data/short_nested_outer_english.json \
