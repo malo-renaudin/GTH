@@ -163,13 +163,29 @@ def evaluate(ckpt_dir: Path, tokenizer, paradigms, results_dir: Path,
         vocab = eval_probability_masses.build_vocabulary()
 
         if probability_masses_orc is not None:
-            pm_orc = eval_probability_masses.process_dataset(str(probability_masses_orc), model, tokenizer, vocab["orc"], eval_probability_masses.get_orc_context, 32)
+            pm_orc = eval_probability_masses.process_dataset(
+                file_path=str(probability_masses_orc),
+                model=model,
+                tokenizer=tokenizer,
+                vocab=vocab["orc"],
+                context_fn=eval_probability_masses.get_orc_context,
+                batch_size=1024,
+                amp=True,
+            )
             with open(results_dir / "probability_masses_orc.json", "w") as f:
                 json.dump(pm_orc, f)
             print(f"  Probability masses (ORC): {pm_orc}")
 
         if probability_masses_wh is not None:
-            pm_wh = eval_probability_masses.process_dataset(str(probability_masses_wh), model, tokenizer, vocab["wh"], eval_probability_masses.get_wh_context, 32)
+            pm_wh = eval_probability_masses.process_dataset(
+                file_path=str(probability_masses_wh),
+                model=model,
+                tokenizer=tokenizer,
+                vocab=vocab["wh"],
+                context_fn=eval_probability_masses.get_wh_context,
+                batch_size=1024,
+                amp=True,
+            )
             with open(results_dir / "probability_masses_wh.json", "w") as f:
                 json.dump(pm_wh, f)
             print(f"  Probability masses (WH): {pm_wh}")
