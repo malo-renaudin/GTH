@@ -193,37 +193,12 @@ def _load_model_and_tokenizer(
 
 
 # ---------------------------------------------------------------------------
-# KV-cache helpers  (GPU acceleration)
+# Candidate scorer — batched, no manual KV-cache manipulation
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def _get_context_cache(
+def _score_candidates(
     context_ids: List[int],
-    model,
-    device: str,
-    amp_ctx,
-) -> Tuple:
-    """Run the model on *context_ids* and return (past_key_values, last_log_probs).
-
-    ``last_log_probs`` is the log-softmax distribution over the vocabulary
-    predicting the first token after the context.  Shape: [vocab_size].
-    Computed once per sentence and shared across all candidate groups.
-    """
-    ctx = torch.tensor([context_ids], dtype=torch.long, device=device)
-    with amp_ctx:
-        out = model(input_ids=ctx, use_cache=True)
-    last_lp = torch.nn.functional.log_softmax(
-        out.logits[0, -1, :].float(), dim=-1
-    )  # [vocab_size]
-
-    return out.past_key_values, last_lp
-
-
-@torch.no_grad()
-def _score_candidates_cached(
-    past_kv,
-    last_lp: torch.Tensor,           # [vocab_size] log-probs for first candidate token
-    ctx_len: int,
     candidate_ids_list: List[List[int]],
     tokenizer,
     model,
@@ -231,87 +206,52 @@ def _score_candidates_cached(
     amp_ctx,
     batch_size: int = 64,
 ) -> List[Tuple[float, int]]:
-    """Score candidates using a pre-computed KV cache for the context.
+    """Score candidates by running context + candidate through the model.
 
-    The KV cache is expanded (read-only) to the batch size; the model only
-    processes candidate tokens on each forward pass — not the context.
+    Each forward pass receives a full (context + candidate) sequence so no
+    manual KV-cache manipulation is needed, making this compatible with every
+    version of transformers.  Candidates within a batch share a single forward
+    pass; the context is re-encoded for each batch.
+
     Returns a list of (log_prob_sum, token_count) in candidate order.
     """
     results: List[Tuple[float, int]] = []
+    ctx_len = len(context_ids)
 
     for i in range(0, len(candidate_ids_list), batch_size):
         batch = candidate_ids_list[i : i + batch_size]
+        seqs = [context_ids + cand for cand in batch]
+        max_len = max(len(s) for s in seqs)
         bsz = len(batch)
-        max_len = max((len(c) for c in batch), default=0)
 
-        if max_len == 0:
+        if max_len == ctx_len:  # all candidates empty
             results.extend((0.0, 0) for _ in batch)
             continue
 
-        # Padded candidate tensor  [bsz, max_len]
         input_ids = torch.full(
             (bsz, max_len), tokenizer.pad_token_id, dtype=torch.long, device=device
         )
-        # Attention mask covers context (in cache) + new candidate positions
-        attn_mask = torch.zeros(
-            bsz, ctx_len + max_len, dtype=torch.long, device=device
-        )
-        attn_mask[:, :ctx_len] = 1  # context positions always attended
-
-        for j, cand in enumerate(batch):
-            if cand:
-                input_ids[j, : len(cand)] = torch.tensor(
-                    cand, dtype=torch.long, device=device
-                )
-                attn_mask[j, ctx_len : ctx_len + len(cand)] = 1
-
-        # Expand KV cache to batch size (.contiguous() required for batched matmuls).
-        # Support both DynamicCache (transformers >= 4.38) and legacy tuple-of-(k,v).
-        if hasattr(past_kv, "key_cache"):
-            from transformers import DynamicCache
-            past_kv_batch = DynamicCache()
-            past_kv_batch.key_cache = [
-                k.expand(bsz, -1, -1, -1).contiguous() for k in past_kv.key_cache
-            ]
-            past_kv_batch.value_cache = [
-                v.expand(bsz, -1, -1, -1).contiguous() for v in past_kv.value_cache
-            ]
-            if hasattr(past_kv, "_seen_tokens"):
-                past_kv_batch._seen_tokens = past_kv._seen_tokens
-        else:
-            past_kv_batch = tuple(
-                (
-                    k.expand(bsz, -1, -1, -1).contiguous(),
-                    v.expand(bsz, -1, -1, -1).contiguous(),
-                )
-                for k, v in past_kv
-            )
+        attention_mask = torch.zeros(bsz, max_len, dtype=torch.long, device=device)
+        for j, s in enumerate(seqs):
+            input_ids[j, : len(s)] = torch.tensor(s, dtype=torch.long, device=device)
+            attention_mask[j, : len(s)] = 1
 
         with amp_ctx:
-            out = model(
-                input_ids=input_ids,
-                attention_mask=attn_mask,
-                past_key_values=past_kv_batch,
-                use_cache=False,
-            )
+            out = model(input_ids=input_ids, attention_mask=attention_mask)
 
-        # out.logits[:, t, :] predicts candidate token t+1.
-        # For position 0 we use last_lp (already computed from context).
-        # Build all_lp[:, t, :] = log P(cand[t] | ctx, cand[0..t-1])
-        first_lp = last_lp.unsqueeze(0).unsqueeze(0).expand(bsz, 1, -1)  # [bsz,1,V]
-        rest_lp = torch.nn.functional.log_softmax(
-            out.logits[:, :-1, :].float(), dim=-1
-        )  # [bsz, max_len-1, V]
-        all_lp = torch.cat([first_lp, rest_lp], dim=1)  # [bsz, max_len, V]
-
-        # Gather log-probs for the actual candidate tokens
+        logits = out.logits[:, :-1, :].float()          # [bsz, max_len-1, V]
+        labels = input_ids[:, 1:]                        # [bsz, max_len-1]
+        lprobs = torch.nn.functional.log_softmax(logits, dim=-1)
         gold_lp = torch.gather(
-            all_lp, 2, input_ids.unsqueeze(-1)
-        ).squeeze(-1)  # [bsz, max_len]
+            lprobs, 2, labels.unsqueeze(-1)
+        ).squeeze(-1)                                    # [bsz, max_len-1]
 
-        valid = attn_mask[:, ctx_len:].bool()  # [bsz, max_len]
-        log_sums = (gold_lp * valid.float()).sum(dim=1)   # [bsz]
-        tok_counts = valid.sum(dim=1)                      # [bsz]
+        positions = torch.arange(1, max_len, device=device).unsqueeze(0)
+        mask_valid = attention_mask[:, 1:].bool()
+        mask_candidate = (positions >= ctx_len) & mask_valid
+
+        log_sums = (gold_lp * mask_candidate).sum(dim=1)
+        tok_counts = mask_candidate.sum(dim=1)
 
         for j in range(bsz):
             results.append((float(log_sums[j].item()), int(tok_counts[j].item())))
@@ -496,7 +436,7 @@ def get_wh_context(sentence: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-sentence evaluation (KV-cache accelerated)
+# Per-sentence evaluation
 # ---------------------------------------------------------------------------
 
 def _eval_sentence_cached(
@@ -511,34 +451,27 @@ def _eval_sentence_cached(
     amp_ctx,
     batch_size: int,
 ) -> dict:
-    """Score one sentence; return a result dict.
-
-    The context is processed exactly once via _get_context_cache; the
-    resulting KV cache is reused for all three candidate groups (NP, VP, ?).
-    """
+    """Score one sentence; return a result dict."""
     context = context_fn(sent)
     context_ids = ids_for_text(tokenizer, context.rstrip() + " ")
-    ctx_len = len(context_ids)
-
-    ctx_kv, ctx_lp = _get_context_cache(context_ids, model, device, amp_ctx)
 
     # NP
-    np_results = _score_candidates_cached(
-        ctx_kv, ctx_lp, ctx_len, np_ids, tokenizer, model, device, amp_ctx, batch_size
+    np_results = _score_candidates(
+        context_ids, np_ids, tokenizer, model, device, amp_ctx, batch_size
     )
     np_geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in np_results]
     np_mass = sum(np_geom) / len(np_geom) if np_geom else 0.0
 
     # VP
-    vp_results = _score_candidates_cached(
-        ctx_kv, ctx_lp, ctx_len, vp_ids, tokenizer, model, device, amp_ctx, batch_size
+    vp_results = _score_candidates(
+        context_ids, vp_ids, tokenizer, model, device, amp_ctx, batch_size
     )
     vp_geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in vp_results]
     vp_mass = sum(vp_geom) / len(vp_geom) if vp_geom else 0.0
 
     # Question mark
-    q_result = _score_candidates_cached(
-        ctx_kv, ctx_lp, ctx_len, q_ids, tokenizer, model, device, amp_ctx, batch_size=1
+    q_result = _score_candidates(
+        context_ids, q_ids, tokenizer, model, device, amp_ctx, batch_size=1
     )
     q_geom = math.exp(q_result[0][0] / q_result[0][1]) if q_result[0][1] > 0 else 0.0
 
