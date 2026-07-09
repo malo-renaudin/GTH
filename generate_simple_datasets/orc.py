@@ -1,154 +1,280 @@
-import random
-import itertools
+#!/usr/bin/env python3
+"""
+Generate ORC (Object Relative Clause) sentences at scale.
+
+Design principles
+-----------------
+* "" is included directly in ADJ/ADV option lists, so every generated
+  combination is unique by construction — no set-deduplication is needed.
+* Each of the 20 n1-forms (10 nouns × singular/plural) is handled by an
+  independent worker that streams sentences directly to a temp file using
+  an 8 MB write buffer.  Workers run in parallel via multiprocessing.Pool.
+* Temp files are concatenated into the final output.
+
+Expected output (default vocabulary, passive enabled)
+-----------------------------------------------------
+  Active ORC  : ~1 164 000 000 sentences
+  Passive ORC :   ~116 400 000 sentences
+  Total       : ~1 280 400 000 sentences  (~70 GB plain text)
+
+Estimated runtime : 2–6 min on a modern 4-core machine.
+Estimated RAM     : ~200 MB (write buffers only).
+"""
+
 import argparse
+import os
+import shutil
+import multiprocessing as mp
+import time
 
-parser = argparse.ArgumentParser(description="Generate a large corpus of sentences based on specific structures.")
-parser.add_argument("--output_file", type=str, default="datasets/orc.txt", help="Path to save the generated corpus.")
-parser.add_argument("--structures", type=int, default=1, help="Structures to generate: 1 for ORC, 2 for SVO.")
-
-args = parser.parse_args()
-struct = args.structures
-output_file = args.output_file
-
-print(f"Generating sentences for structures: {struct}")
-
-# Verb-adverb compatibility rules
-# Some verbs don't work well with certain adverbs
-ADVERB_RESTRICTIONS = {
-    "follows": {"secretly"},  # Only frequency adverbs work well
-    "greets": {"secretly"},# Can't greet secretly
-
+# ---------------------------------------------------------------------------
+# Verb–adverb compatibility
+# ---------------------------------------------------------------------------
+ADVERB_RESTRICTIONS: dict = {
+    "follows": {"secretly"},   # following secretly is semantically odd
+    "greets":  {"secretly"},   # greetings are by definition public
+    "notices": {"openly"},     # noticing is perceptual, not a public act
 }
 
-PAST_PARTICIPLES = {
-    "visits":  "visited",
-    "helps":   "helped",
-    "avoids":  "avoided",
-    "follows": "followed",
-    "greets":  "greeted",
+PAST_PARTICIPLES: dict = {
+    "visits":   "visited",
+    "helps":    "helped",
+    "avoids":   "avoided",
+    "follows":  "followed",
+    "greets":   "greeted",
+    "contacts": "contacted",
+    "guides":   "guided",
+    "assists":  "assisted",
+    "teaches":  "taught",
+    "notices":  "noticed",
 }
 
-# Auxiliaries for the active ORC variant (modal / do-support; verb takes base form)
-AUX_LIST = ["", "did ", "could ", "couldn't ", "didn't ", "would ", "wouldn't ", "should ", "shouldn't ", "might "]
+# ---------------------------------------------------------------------------
+# Vocabulary
+# "" at index 0 of ADJ/ADV lists means "no modifier".
+# Including it here makes every combination unique — no dedup step needed.
+# ---------------------------------------------------------------------------
+N1_OPTS: list = [
+    "boy", "student", "doctor", "artist", "athlete",
+    "teacher", "lawyer", "farmer", "writer", "cook",
+]
+N2_OPTS: list = [
+    "girl", "child", "pilot", "scientist", "engineer",
+    "reporter", "officer", "manager", "dancer", "chef",
+]
+V_OPTS: list = [
+    ("visits",   "visit"),
+    ("helps",    "help"),
+    ("avoids",   "avoid"),
+    ("follows",  "follow"),
+    ("greets",   "greet"),
+    ("contacts", "contact"),
+    ("guides",   "guide"),
+    ("assists",  "assist"),
+    ("teaches",  "teach"),
+    ("notices",  "notice"),
+]
 
-def is_valid_verb_adverb_combo(verb, adverb):
-    """Check if verb + adverb combination is natural."""
-    if verb in ADVERB_RESTRICTIONS:
-        return adverb not in ADVERB_RESTRICTIONS[verb]
-    return True
+ADJ1_OPTS: list = [
+    "", "big", "tall", "young", "strong", "kind",
+    "old", "quiet", "cheerful", "serious",
+]  # 10 options: index 0 = no adjective
+ADJ2_OPTS: list = [
+    "", "beautiful", "smart", "brave", "famous", "honest",
+    "wise", "gentle", "curious", "experienced",
+]  # 10 options
+ADV_OPTS: list = [
+    "", "possibly", "apparently", "secretly", "always", "often",
+    "rarely", "frequently", "openly", "regularly",
+]  # 10 options
 
-def generate_sentence_variants(structure, n1, n2, v1_sing, v1_plur, adj1, adj2, adv1, n1_is_plural=False, n2_is_plural=False):
-    current_n1 = pluralize_noun(n1) if n1_is_plural else n1 
-    current_n2 = pluralize_noun(n2) if n2_is_plural else n2
-    current_v1 = v1_plur if n2_is_plural else v1_sing
-    
-    modifiers = {
-        'adj1': [adj1, ""],
-        'adj2': [adj2, ""],
-        'adv1': [adv1, ""],
-        'rel': ["that", "who", ""]
-    }
-    if structure == 1:
-        modifiers['aux1'] = AUX_LIST
+REL_OPTS: list = ["that", "who", ""]   # "" = zero-relative clause
+AUX_LIST: list = [
+    "", "did ", "could ", "couldn't ", "didn't ",
+    "would ", "wouldn't ", "should ", "shouldn't ", "might ",
+]  # 10 options; non-empty items carry a trailing space
 
-    keys = modifiers.keys()
-    combinations = list(itertools.product(*modifiers.values()))
-    
-    # We return a list of tuples: (core_string, n1_is_plural)
-    cores = []
+CONT_SING: list = [
+    "is eating an apple",    "is watching a movie",   "is reading a book",
+    "likes to dance",        "enjoys music",           "likes climbing",
+    "is taking a walk",      "is cooking dinner",      "is playing chess",
+    "is practicing guitar",
+]
+CONT_PLUR: list = [
+    "are eating an apple",   "are watching a movie",  "are reading a book",
+    "like to dance",         "enjoy music",            "like climbing",
+    "are taking a walk",     "are cooking dinner",     "are playing chess",
+    "are practicing guitar",
+]
 
-    for combo in combinations:
-        d = dict(zip(keys, combo))
-        
-        # Skip invalid verb-adverb combinations
-        if not is_valid_verb_adverb_combo(v1_sing, d['adv1']):
-            continue
-            
-        if structure == 1:
-            aux1 = d.get('aux1', '')
-            v1_form = v1_plur if aux1 else current_v1  # base form after aux, agreement-based otherwise
-            s_core = f"The {d['adj1']} {current_n1} {d['rel']} the {d['adj2']} {current_n2} {aux1}{d['adv1']} {v1_form}"
-        elif structure == 2:
-            s_core = f"The {d['adj2']} {current_n2} {d['adv1']} {current_v1} the {d['adj1']} {current_n1}"
-        
-        clean_core = " ".join(s_core.split()).strip()
-        cores.append((clean_core, n1_is_plural, structure))
+_IRREGULARS: dict = {"child": "children", "man": "men", "woman": "women"}
 
-    # Grammatical passive ORC: "The N1 that was/were [adv] V-pp by the N2"
-    # was/were agrees with n1 (the passive subject); n2 is the "by" agent
-    if structure == 1:
-        v1_pp = PAST_PARTICIPLES.get(v1_sing)
-        if v1_pp:
-            aux_pass = "were " if n1_is_plural else "was "
-            pass_modifiers = {'adj1': [adj1, ""], 'adj2': [adj2, ""], 'adv1': [adv1, ""], 'rel': ["that", "who", ""]}
-            for combo in itertools.product(*pass_modifiers.values()):
-                d = dict(zip(pass_modifiers.keys(), combo))
-                if not is_valid_verb_adverb_combo(v1_sing, d['adv1']):
-                    continue
-                s_core = f"The {d['adj1']} {current_n1} {d['rel']} {aux_pass}{d['adv1']} {v1_pp} by the {d['adj2']} {current_n2}"
-                clean_core = " ".join(s_core.split()).strip()
-                cores.append((clean_core, n1_is_plural, structure))
 
-    return cores
+def _pluralize(noun: str) -> str:
+    return _IRREGULARS.get(noun, noun + "s")
 
-def generate_full_corpus(struct, n1_opts, n2_opts, v_opts, adj1_opts, adj2_opts, adv1_opts):
-    # This set will store (core_string, n1_is_plural, structure)
-    # Because it's a set of tuples, it will catch duplicates in the core!
-    unique_cores = set()
-    
-    word_combinations = itertools.product(n1_opts, n2_opts, v_opts, adj1_opts, adj2_opts, adv1_opts)
-    
-    for n1, n2, v_pair, adj1, adj2, adv1 in word_combinations:
-        v_sing, v_plur = v_pair
-        
-        # We only care about Structure 1 (ORC) based on your loop
-        # for struct in [1]:
-        for n1_p, n2_p in itertools.product([False, True], [False, True]):
-            scenarios = generate_sentence_variants(
-                struct, n1, n2, v_sing, v_plur, adj1, adj2, adv1, n1_p, n2_p
-            )
-            unique_cores.update(scenarios)
 
-    # NOW we add the random continuations to the unique cores
-    final_sentences = []
-    
-    cont_sing = ["is eating an apple", "is watching a movie", "is reading a book", "likes to dance", "enjoys music", "likes climbing"]
-    cont_plur = ["are eating an apple", "are watching a movie", "are reading a book", "like to dance", "enjoy music", "like climbing"]
+# ---------------------------------------------------------------------------
+# Worker — streams all sentences for one (n1_form, n1_is_plural) pair
+# ---------------------------------------------------------------------------
+def _worker(task: tuple) -> tuple:
+    """
+    Generate every ORC sentence whose head noun is *n1_form* and stream
+    them to *tmp_path*.  Returns (sentence_count, tmp_path).
+    """
+    n1_form, n1_is_plural, tmp_path, include_passive = task
+    conts = CONT_PLUR if n1_is_plural else CONT_SING
+    n_conts = len(conts)
+    count = 0
 
-    for core, is_plural, struct in unique_cores:
-        if struct == 1:
-            tail = random.choice(cont_plur) if is_plural else random.choice(cont_sing)
-            full_sent = f"{core} {tail}."
-        else:
-            full_sent = f"{core}."
-            
-        final_sentences.append(full_sent.capitalize())
+    with open(tmp_path, "w", buffering=8 * 1024 * 1024) as fh:
+        for n2_base in N2_OPTS:
+            for n2_is_plural in (False, True):
+                n2_form = _pluralize(n2_base) if n2_is_plural else n2_base
 
-    return final_sentences
+                for v_sing, v_plur in V_OPTS:
+                    v_pp = PAST_PARTICIPLES[v_sing]
+                    restricted = ADVERB_RESTRICTIONS.get(v_sing, set())
+                    valid_advs = [a for a in ADV_OPTS if a not in restricted]
 
-# 1. Define the 3-word vocabulary
-n1_opts = ["boy", "student", "doctor", "artist", "athlete"]
-n2_opts = ["girl", "child", "pilot", "scientist", "engineer"] # 'child' requires an irregular plural check
-v_opts = [("visits", "visit"), ("helps", "help"), ("avoids", "avoid"), ("follows", "follow"), ("greets", "greet")]
-adj1_opts = ["big", "tall", "young", "strong", "kind"]
-adj2_opts = ["beautiful", "smart", "brave", "famous", "honest"]
-adv1_opts = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
+                    for adj1 in ADJ1_OPTS:
+                        a1 = adj1 + " " if adj1 else ""
+                        for adj2 in ADJ2_OPTS:
+                            a2 = adj2 + " " if adj2 else ""
+                            for adv in valid_advs:
+                                av = adv + " " if adv else ""
+                                for rel in REL_OPTS:
+                                    r = " " + rel if rel else ""
 
-# 2. Update Noun Pluralization for irregulars
-def pluralize_noun(noun):
-    irregulars = {"child": "children", "man": "men", "woman": "women"}
-    if noun in irregulars:
-        return irregulars[noun]
-    return noun + "s"
+                                    # ── Active ORC ──────────────────────────
+                                    # Template:
+                                    #   The [adj1] N1 [rel] the [adj2] N2 [aux][adv] V_form CONT.
+                                    for aux in AUX_LIST:
+                                        v_form = (
+                                            v_plur if aux                        # base form after auxiliary
+                                            else (v_plur if n2_is_plural         # plural agreement
+                                                  else v_sing)
+                                        )
+                                        prefix = (
+                                            f"The {a1}{n1_form}{r}"
+                                            f" the {a2}{n2_form}"
+                                            f" {aux}{av}{v_form}"
+                                        )
+                                        for cont in conts:
+                                            fh.write(prefix)
+                                            fh.write(" ")
+                                            fh.write(cont)
+                                            fh.write(".\n")
+                                        count += n_conts
 
-# 3. Generate the massive corpus
-# Note: This might take a few seconds to run due to the 93k+ iterations
-final_corpus = generate_full_corpus(
-    struct, n1_opts, n2_opts, v_opts, 
-    adj1_opts, adj2_opts, adv1_opts
-)
-final_corpus = list(dict.fromkeys(final_corpus))  # remove duplicates, preserve order
-with open(output_file, "w") as f:
-    for sentence in final_corpus:
-        f.write(sentence + "\n")
-print(f"Total Sentences in Corpus: {len(final_corpus)}")
+                                    # ── Passive ORC ─────────────────────────
+                                    if include_passive:
+                                        if rel:
+                                            # Full passive relative:
+                                            #   "N1 that/who was/were [adv] V-pp by N2"
+                                            aux_p = "were " if n1_is_plural else "was "
+                                            prefix = (
+                                                f"The {a1}{n1_form}{r}"
+                                                f" {aux_p}{av}{v_pp}"
+                                                f" by the {a2}{n2_form}"
+                                            )
+                                        else:
+                                            # Zero-relative → reduced participial:
+                                            #   "N1 [adv] V-pp by N2"  (no was/were)
+                                            prefix = (
+                                                f"The {a1}{n1_form}"
+                                                f" {av}{v_pp}"
+                                                f" by the {a2}{n2_form}"
+                                            )
+                                        for cont in conts:
+                                            fh.write(prefix)
+                                            fh.write(" ")
+                                            fh.write(cont)
+                                            fh.write(".\n")
+                                        count += n_conts
+
+    return count, tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Stream ~1.28 B grammatical ORC sentences to disk.\n"
+            "  Disk usage  : ~70 GB plain text\n"
+            "  RAM usage   : ~200 MB\n"
+            "  Runtime     : ~2-6 min on a 4-core machine"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--output_file", default="datasets/orc.txt",
+                        help="Destination file (default: datasets/orc.txt).")
+    parser.add_argument("--workers", type=int, default=0,
+                        help="Parallel workers (0 = all CPU cores, default: 0).")
+    parser.add_argument("--no-passive", dest="no_passive", action="store_true",
+                        help="Omit passive ORC sentences (~116 M fewer sentences).")
+    # kept for backwards-compatibility; value is ignored (always generates ORC)
+    parser.add_argument("--structures", type=int, default=1,
+                        help=argparse.SUPPRESS)
+    args = parser.parse_args()
+
+    include_passive = not args.no_passive
+    n_workers = args.workers or mp.cpu_count()
+
+    # Build all (n1_form, n1_is_plural) pairs: 10 nouns x 2 = 20 tasks
+    n1_items = []
+    for noun in N1_OPTS:
+        n1_items.append((noun, False))
+        n1_items.append((_pluralize(noun), True))
+
+    base = args.output_file
+    os.makedirs(os.path.dirname(os.path.abspath(base)), exist_ok=True)
+
+    tasks = [
+        (form, is_plur, f"{base}.part{i:03d}", include_passive)
+        for i, (form, is_plur) in enumerate(n1_items)
+    ]
+
+    # Approximate expected count (informational)
+    # 20 n1 x 20 n2 x 10 v x 10 adj1 x 10 adj2 x ~9.7 adv x 3 rel x 10 aux x 10 cont
+    expected_active  = 1_164_000_000
+    expected_passive = 116_400_000 if include_passive else 0
+    expected_total   = expected_active + expected_passive
+    expected_gb      = expected_total * 70 // 1_000_000_000
+
+    print(f"Workers  : {n_workers}")
+    print(f"Tasks    : {len(tasks)}  (one per head-noun form)")
+    print(f"Passive  : {'yes' if include_passive else 'no'}")
+    print(f"Expected : ~{expected_total:,} sentences  (~{expected_gb} GB)")
+    print(f"Output   : {base}")
+    print("Generating...")
+
+    t0 = time.time()
+    with mp.Pool(n_workers) as pool:
+        results = list(pool.imap_unordered(_worker, tasks))
+
+    gen_elapsed = time.time() - t0
+    total = sum(c for c, _ in results)
+    rate  = total / gen_elapsed / 1_000_000
+    print(f"\nGenerated {total:,} sentences in {gen_elapsed:.1f}s  ({rate:.2f} M sent/s).")
+
+    print("Merging parts into final file...")
+    t1 = time.time()
+    with open(base, "wb") as out:
+        # sort by tmp path to keep a deterministic output order
+        for _, tmp in sorted(results, key=lambda x: x[1]):
+            with open(tmp, "rb") as inp:
+                shutil.copyfileobj(inp, out, length=16 * 1024 * 1024)
+            os.remove(tmp)
+
+    merge_elapsed = time.time() - t1
+    total_elapsed = time.time() - t0
+    print(f"Merged   : {merge_elapsed:.1f}s")
+    print(f"Total    : {total_elapsed:.1f}s")
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()
