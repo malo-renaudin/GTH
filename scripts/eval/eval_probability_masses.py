@@ -215,6 +215,7 @@ def _get_context_cache(
     last_lp = torch.nn.functional.log_softmax(
         out.logits[0, -1, :].float(), dim=-1
     )  # [vocab_size]
+
     return out.past_key_values, last_lp
 
 
@@ -264,20 +265,27 @@ def _score_candidates_cached(
                 )
                 attn_mask[j, ctx_len : ctx_len + len(cand)] = 1
 
-        # Expand KV cache to batch size (.contiguous() required for batched matmuls)
-        # Support both legacy tuple-of-(k,v) and newer DynamicCache objects.
+        # Expand KV cache to batch size (.contiguous() required for batched matmuls).
+        # Support both DynamicCache (transformers >= 4.38) and legacy tuple-of-(k,v).
         if hasattr(past_kv, "key_cache"):
-            # transformers >= 4.38 DynamicCache
-            kv_pairs = zip(past_kv.key_cache, past_kv.value_cache)
+            from transformers import DynamicCache
+            past_kv_batch = DynamicCache()
+            past_kv_batch.key_cache = [
+                k.expand(bsz, -1, -1, -1).contiguous() for k in past_kv.key_cache
+            ]
+            past_kv_batch.value_cache = [
+                v.expand(bsz, -1, -1, -1).contiguous() for v in past_kv.value_cache
+            ]
+            if hasattr(past_kv, "_seen_tokens"):
+                past_kv_batch._seen_tokens = past_kv._seen_tokens
         else:
-            kv_pairs = iter(past_kv)
-        past_kv_batch = tuple(
-            (
-                k.expand(bsz, -1, -1, -1).contiguous(),
-                v.expand(bsz, -1, -1, -1).contiguous(),
+            past_kv_batch = tuple(
+                (
+                    k.expand(bsz, -1, -1, -1).contiguous(),
+                    v.expand(bsz, -1, -1, -1).contiguous(),
+                )
+                for k, v in past_kv
             )
-            for k, v in kv_pairs
-        )
 
         with amp_ctx:
             out = model(
