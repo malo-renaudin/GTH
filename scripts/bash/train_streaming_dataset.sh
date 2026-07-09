@@ -27,5 +27,3 @@ python scripts/train/streaming_dataset.py \
    --c4 0.9 \
    --orc 0 \
    --wh 0.1 \
-   --svo_wh 0 \
-   --svo_orc 0 \

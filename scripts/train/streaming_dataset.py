@@ -25,8 +25,8 @@ argument_parser.add_argument("--output-dir", type=str)
 argument_parser.add_argument("--c4", type=float, default=0.9)
 argument_parser.add_argument("--orc", type=float, default=0)
 argument_parser.add_argument("--wh", type=float, default=0)
-argument_parser.add_argument("--svo_wh", type=float, default=0.05)
-argument_parser.add_argument("--svo_orc", type=float, default=0.05)
+# argument_parser.add_argument("--svo_wh", type=float, default=0.05)
+# argument_parser.add_argument("--svo_orc", type=float, default=0.05)
 argument_parser.add_argument("--log-scale-n-points",   type=int, default=20)
 argument_parser.add_argument("--log-scale-start-step", type=int, default=10)
 argument_parser.add_argument("--blimp-dir",            type=str, default="eval_data/blimp_data")
@@ -73,10 +73,10 @@ def _c4_val_loader():
     for ex in ds:
         yield {"text": ex["text"]}
 
-def _make_text_loader(filepath):
+def _make_text_loader(dirpath):
     """Returns an infinite-cycling loader for a line-per-sentence text file."""
     def loader():
-        ds = load_dataset("text", data_files=filepath, split="train")  # map-style, fits in RAM
+        ds = load_from_disk(dirpath)  # map-style, fits in RAM
         while True:
             for ex in ds:
                 yield {"text": ex["text"]}
@@ -186,10 +186,10 @@ class PackedStreamingDataset(TorchIterableDataset):
 
 _train_candidates = [
     (_c4_train_loader,                                  args.c4),
-    (_make_text_loader("data/orc_final.txt"),                args.orc),
-    (_make_text_loader("data/wh_final.txt"),                 args.wh),
-    (_make_text_loader("datasets/wh.txt"), args.svo_wh),
-    (_make_text_loader("datasets/orc.txt"), args.svo_orc),
+    (_make_text_loader("datasets/orc_arrow.txt"),                args.orc),
+    (_make_text_loader("datasets/wh_arrow.txt"),                 args.wh),
+    # (_make_text_loader("datasets/wh.txt"), args.svo_wh),
+    # (_make_text_loader("datasets/orc.txt"), args.svo_orc),
 ]
 
 train_dataset = PackedStreamingDataset(
