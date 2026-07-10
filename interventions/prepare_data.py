@@ -41,6 +41,8 @@ def parse_args():
     p.add_argument("--position-words", nargs="+",
                     default=["relativizer", "the", "noun", "verb"],
                     help="labels for the last N words of pre_gap_text, left to right")
+    p.add_argument("--outer-verb", action="store_true",
+                    help="Use one anchor labeled 'outer_verb' at the last token of pre_gap_text")
     p.add_argument("--train-frac", type=float, default=0.8)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output-dir", required=True)
@@ -58,6 +60,7 @@ def last_n_words(text, n):
 
 def build_rows(df, args):
     rows = []
+    position_words = ["outer_verb"] if args.outer_verb else args.position_words
     for qid, group in df.groupby("quadruplet_id"):
         def find(filler, gap):
             match = group[(group["filler"] == filler) & (group["gap"] == gap)]
@@ -72,11 +75,11 @@ def build_rows(df, args):
         yb = first_word(base_row["post_gap_text"])
         ys = first_word(source_row["post_gap_text"])
 
-        n = len(args.position_words)
+        n = len(position_words)
         base_anchors = last_n_words(base_row["pre_gap_text"], n)
         source_anchors = last_n_words(source_row["pre_gap_text"], n)
 
-        for label, b_anchor, s_anchor in zip(args.position_words, base_anchors, source_anchors):
+        for label, b_anchor, s_anchor in zip(position_words, base_anchors, source_anchors):
             rows.append({
                 "quadruplet_id": qid,
                 "position_label": label,
