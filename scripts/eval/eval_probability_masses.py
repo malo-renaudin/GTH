@@ -6,7 +6,7 @@ Usage:
   python scripts/eval/eval_probability_masses.py \\
         --checkpoint <hf-checkpoint> \\
         --orc_test <orc_test.txt> --wh_test <wh_test.txt> \\
-        --out results.csv [--amp] [--compile]
+      --out results.csv [--subset_size N --subset_repeats N] [--amp] [--compile]
 
 Vocabularies match generate_simple_datasets/orc.py and wh.py exactly.
 
@@ -33,7 +33,9 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import random
 import re
+import statistics
 from contextlib import nullcontext
 from typing import List, Optional, Tuple
 
@@ -168,6 +170,37 @@ def pluralize_noun(noun: str) -> str:
 
 def ids_for_text(tokenizer, text: str) -> List[int]:
     return tokenizer(text, add_special_tokens=False).input_ids
+
+
+def _mean_and_std_for_candidates(
+    context_ids: List[int],
+    candidate_ids_list: List[List[int]],
+    tokenizer,
+    model,
+    device: str,
+    amp_ctx,
+    batch_size: int,
+    subset_size: Optional[int] = None,
+    subset_repeats: int = 1,
+) -> Tuple[float, float]:
+    if not candidate_ids_list:
+        return 0.0, 0.0
+
+    if subset_size is None or subset_size <= 0 or subset_size >= len(candidate_ids_list):
+        batches = [candidate_ids_list]
+    else:
+        repeats = max(1, subset_repeats)
+        batches = [random.sample(candidate_ids_list, subset_size) for _ in range(repeats)]
+
+    masses: List[float] = []
+    for batch in batches:
+        results = _score_candidates(
+            context_ids, batch, tokenizer, model, device, amp_ctx, batch_size
+        )
+        geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in results]
+        masses.append(sum(geom) / len(geom) if geom else 0.0)
+
+    return statistics.median(masses), (statistics.pstdev(masses) if len(masses) > 1 else 0.0)
 
 
 def _load_model_and_tokenizer(
@@ -469,24 +502,24 @@ def _eval_sentence_cached(
     device: str,
     amp_ctx,
     batch_size: int,
+    subset_size: Optional[int] = None,
+    subset_repeats: int = 1,
 ) -> dict:
     """Score one sentence; return a result dict."""
     context = context_fn(sent)
     context_ids = ids_for_text(tokenizer, context.rstrip() + " ")
 
     # NP
-    np_results = _score_candidates(
-        context_ids, np_ids, tokenizer, model, device, amp_ctx, batch_size
+    np_mass, np_std = _mean_and_std_for_candidates(
+        context_ids, np_ids, tokenizer, model, device, amp_ctx, batch_size,
+        subset_size=subset_size, subset_repeats=subset_repeats,
     )
-    np_geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in np_results]
-    np_mass = sum(np_geom) / len(np_geom) if np_geom else 0.0
 
     # VP
-    vp_results = _score_candidates(
-        context_ids, vp_ids, tokenizer, model, device, amp_ctx, batch_size
+    vp_mass, vp_std = _mean_and_std_for_candidates(
+        context_ids, vp_ids, tokenizer, model, device, amp_ctx, batch_size,
+        subset_size=subset_size, subset_repeats=subset_repeats,
     )
-    vp_geom = [math.exp(ls / cnt) if cnt > 0 else 0.0 for ls, cnt in vp_results]
-    vp_mass = sum(vp_geom) / len(vp_geom) if vp_geom else 0.0
 
     # Question mark
     q_result = _score_candidates(
@@ -498,8 +531,14 @@ def _eval_sentence_cached(
         "sentence": sent,
         "context":  context,
         "np_mass":  float(np_mass),
+        "np_mass_median": float(np_mass),
+        "np_mass_std": float(np_std),
         "vp_mass":  float(vp_mass),
+        "vp_mass_median": float(vp_mass),
+        "vp_mass_std": float(vp_std),
         "q_mass":   float(q_geom),
+        "q_mass_median": float(q_geom),
+        "q_mass_std": 0.0,
         "np_count": len(np_ids),
         "vp_count": len(vp_ids),
     }
@@ -518,6 +557,8 @@ def process_dataset(
     batch_size: int = 64,
     sent_limit: Optional[int] = None,
     amp: bool = False,
+    subset_size: Optional[int] = None,
+    subset_repeats: int = 1,
 ) -> dict:
     """Process a test file and return aggregated probability masses for NP/VP/?.
 
@@ -560,6 +601,7 @@ def process_dataset(
         r = _eval_sentence_cached(
             sent, context_fn, np_ids, vp_ids, q_ids,
             tokenizer, model, device, amp_ctx, batch_size,
+            subset_size=subset_size, subset_repeats=subset_repeats,
         )
         r["file"] = file_path
         r["idx"]  = len(rows)
@@ -581,6 +623,8 @@ def evaluate_sentences(
     sent_limit: Optional[int] = None,
     cand_batch_size: int = 64,
     amp: bool = False,
+    subset_size: Optional[int] = None,
+    subset_repeats: int = 1,
 ) -> None:
     """Evaluate all sentences in *filename* (domain='orc' or 'wh').
 
@@ -615,6 +659,7 @@ def evaluate_sentences(
         r = _eval_sentence_cached(
             sent, context_fn, np_ids, vp_ids, q_ids,
             tokenizer, model, device, amp_ctx, cand_batch_size,
+            subset_size=subset_size, subset_repeats=subset_repeats,
         )
         r["file"] = filename
         r["idx"]  = i
@@ -636,6 +681,10 @@ def main() -> None:
                    help="Cap sentences per file (for debugging)")
     p.add_argument("--cand_batch_size", type=int, default=64,
                    help="Candidate batch size; increase for more GPU throughput")
+    p.add_argument("--subset_size", type=int, default=None,
+                   help="If set, score one random subset of this many NP/VP continuations per repeat")
+    p.add_argument("--subset_repeats", type=int, default=1,
+                   help="Number of random subsets to sample and score per sentence")
     p.add_argument("--amp", action="store_true",
                    help="Enable torch.autocast (float16/bf16) on CUDA — ~2x faster")
     p.add_argument("--compile", action="store_true",
@@ -651,15 +700,20 @@ def main() -> None:
     evaluate_sentences(
         args.orc_test, "orc", tokenizer, model, device, rows,
         sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size, amp=args.amp,
+        subset_size=args.subset_size, subset_repeats=args.subset_repeats,
     )
     evaluate_sentences(
         args.wh_test, "wh", tokenizer, model, device, rows,
         sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size, amp=args.amp,
+        subset_size=args.subset_size, subset_repeats=args.subset_repeats,
     )
 
     fieldnames = [
         "file", "idx", "sentence", "context",
-        "np_mass", "vp_mass", "q_mass", "np_count", "vp_count",
+        "np_mass", "np_mass_median", "np_mass_std",
+        "vp_mass", "vp_mass_median", "vp_mass_std",
+        "q_mass", "q_mass_median", "q_mass_std",
+        "np_count", "vp_count",
     ]
     with open(args.out, "w", encoding="utf-8", newline="") as out_f:
         writer = csv.DictWriter(out_f, fieldnames=fieldnames)
@@ -673,11 +727,24 @@ def main() -> None:
     def mean(lst: List[dict], key: str) -> float:
         return sum(x[key] for x in lst) / len(lst) if lst else 0.0
 
+    def median(lst: List[dict], key: str) -> float:
+        return statistics.median([x[key] for x in lst]) if lst else 0.0
+
+    def std(lst: List[dict], key: str) -> float:
+        values = [x[key] for x in lst]
+        return statistics.pstdev(values) if len(values) > 1 else 0.0
+
     print("Saved results to:", args.out)
-    print("ORC avg masses: NP=%.6f  VP=%.6f  Q=%.6f" % (
-        mean(orc_rows, "np_mass"), mean(orc_rows, "vp_mass"), mean(orc_rows, "q_mass")))
-    print("WH  avg masses: NP=%.6f  VP=%.6f  Q=%.6f" % (
-        mean(wh_rows,  "np_mass"), mean(wh_rows,  "vp_mass"), mean(wh_rows,  "q_mass")))
+    print("ORC masses: NP=%.6f (med=%.6f std=%.6f)  VP=%.6f (med=%.6f std=%.6f)  Q=%.6f (med=%.6f std=%.6f)" % (
+        mean(orc_rows, "np_mass"), median(orc_rows, "np_mass"), std(orc_rows, "np_mass"),
+        mean(orc_rows, "vp_mass"), median(orc_rows, "vp_mass"), std(orc_rows, "vp_mass"),
+        mean(orc_rows, "q_mass"), median(orc_rows, "q_mass"), std(orc_rows, "q_mass"),
+    ))
+    print("WH masses:  NP=%.6f (med=%.6f std=%.6f)  VP=%.6f (med=%.6f std=%.6f)  Q=%.6f (med=%.6f std=%.6f)" % (
+        mean(wh_rows,  "np_mass"), median(wh_rows,  "np_mass"), std(wh_rows,  "np_mass"),
+        mean(wh_rows,  "vp_mass"), median(wh_rows,  "vp_mass"), std(wh_rows,  "vp_mass"),
+        mean(wh_rows,  "q_mass"), median(wh_rows,  "q_mass"), std(wh_rows,  "q_mass"),
+    ))
 
 
 if __name__ == "__main__":
