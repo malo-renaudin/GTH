@@ -60,6 +60,7 @@ def run_das(
     epochs,
     batch_size,
     lr,
+    state_dict_in=None,
 ):
 
     cmd = [
@@ -84,6 +85,12 @@ def run_das(
         "--output-dir",
         output_dir,
     ]
+
+    if state_dict_in is not None:
+        cmd.extend([
+            "--state-dict-in",
+            state_dict_in,
+        ])
 
     print("\nRunning:")
     print(" ".join(cmd))
@@ -132,6 +139,7 @@ def main():
     # ----------------------------------------------------
 
     stability_results = []
+    trained_out_dirs = {}
 
     for ckpt in checkpoints:
 
@@ -153,6 +161,8 @@ def main():
             args.batch_size,
             args.lr,
         )
+
+        trained_out_dirs[name] = out
 
         best = best_result(
             args,
@@ -202,9 +212,11 @@ def main():
                 args.epochs,
                 args.batch_size,
                 args.lr,
+                state_dict_in=os.path.join(trained_out_dirs[train_name], "interventions"),
             )
 
             best = best_result(
+                args,
                 os.path.join(out, "results.csv")
             )
 

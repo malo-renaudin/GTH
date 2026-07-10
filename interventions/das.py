@@ -13,6 +13,7 @@ mappings, so the CSV is tokenizer-agnostic.
 import argparse
 import os
 import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -43,6 +44,7 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--state-dict-in", type=Path, default=None)
     p.add_argument("--output-dir", required=True)
     return p.parse_args()
 
@@ -286,7 +288,6 @@ def main():
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    train_model, train_tokenizer = load_model(args.train_checkpoint, device)
     eval_model, eval_tokenizer = load_model(args.eval_checkpoint, device)
 
     train_df_full = pd.read_csv(args.train_df)
@@ -304,17 +305,29 @@ def main():
 
             tr = train_df_full[train_df_full["position_label"] == label].reset_index(drop=True)
             ev = eval_df_full[eval_df_full["position_label"] == label].reset_index(drop=True)
-
-            intervenable = make_intervenable(train_model, layer, device)
-            train_loss = train_intervention(
-                intervenable, train_tokenizer, tr,
-                args.epochs, args.batch_size, args.lr, device,
-            )
-
-            state_dict = intervenable.state_dict()
             cell_dir = os.path.join(interventions_dir, f"layer{layer}_{label}")
             os.makedirs(cell_dir, exist_ok=True)
-            torch.save(state_dict, os.path.join(cell_dir, "state_dict.pt"))
+
+            if args.state_dict_in is None:
+                state_dict_path = Path(cell_dir) / "state_dict.pt"
+            elif args.state_dict_in.is_dir():
+                state_dict_path = args.state_dict_in / f"layer{layer}_{label}" / "state_dict.pt"
+            else:
+                state_dict_path = args.state_dict_in
+
+            if args.state_dict_in is None:
+                train_model, train_tokenizer = load_model(args.train_checkpoint, device)
+                intervenable = make_intervenable(train_model, layer, device)
+                train_loss = train_intervention(
+                    intervenable, train_tokenizer, tr,
+                    args.epochs, args.batch_size, args.lr, device,
+                )
+
+                state_dict = intervenable.state_dict()
+                torch.save(state_dict, state_dict_path)
+            else:
+                train_loss = float("nan")
+                state_dict = torch.load(state_dict_path, map_location=device)
 
             eval_intervenable = make_intervenable(eval_model, layer, device)
             eval_intervenable.load_state_dict(state_dict)
