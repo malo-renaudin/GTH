@@ -134,7 +134,7 @@ def make_intervenable(model, layer, device):
                 component="block_output",
                 unit="pos",
                 max_number_of_units=1,
-                low_rank_dimension=8,
+                low_rank_dimension=1,
             )
         ],
         intervention_types=LowRankRotatedSpaceIntervention,
