@@ -168,7 +168,10 @@ def resolve_positions(tokenizer, texts, anchors):
 
 def train_intervention(intervenable, tokenizer, train_df,
                        epochs, batch_size, lr, device):
-    optimizer = torch.optim.Adam(intervenable.get_trainable_parameters(), lr=lr)
+    trainable = list(intervenable.get_trainable_parameters())
+    print(f"  trainable params: {len(trainable)}, "
+          f"total numel: {sum(p.numel() for p in trainable)}")
+    optimizer = torch.optim.Adam(trainable, lr=lr)
     losses = []
     for epoch in range(epochs):
         df = train_df.sample(frac=1).reset_index(drop=True)
@@ -249,6 +252,9 @@ def evaluate_odds(intervenable, base_model, tokenizer, eval_df,
         base_logits = base_model(**base_enc).logits
         _, cf_outputs = intervenable(base_enc, [src_enc], unit_locations=unit_locations)
         int_logits = cf_outputs.logits
+        if start == 0:
+            diff = (int_logits - base_logits).abs().max().item()
+            print(f"  [eval sanity] max |int_logits - base_logits| = {diff:.6f}")
 
         for j, idx in enumerate(valid):
             row = batch.iloc[idx]
