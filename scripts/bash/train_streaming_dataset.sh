@@ -31,6 +31,7 @@ case ${SLURM_ARRAY_TASK_ID} in
         C4=0.9
         ORC=0.0
         SVO=0.0
+        WH=0.0
         ;;
     2)
         OUTPUT_DIR="results/both_augmented_good_datasets"
