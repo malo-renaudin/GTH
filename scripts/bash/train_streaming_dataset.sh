@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=ywa@h100
+#SBATCH --account=ldh@h100
 #SBATCH --partition=gpu_p6
 #SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --constraint=h100
@@ -13,8 +13,8 @@
 #SBATCH --error=results/logs/error_train_streaming_%A_%a.log
 #SBATCH --output=results/logs/output_train_streaming_%A_%a.log
 
-source $WORK/miniconda3/etc/profile.d/conda.sh
-conda activate litgpt_jz
+module load anaconda-py3/2024.06
+conda activate $WORK/envs/litgpt_jz
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
