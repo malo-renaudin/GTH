@@ -18,34 +18,37 @@ conda activate litgpt_jz
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
-        OUTPUT_DIR="results/orc_augmented_full_datasets"
+        OUTPUT_DIR="results/orc_augmented_good_datasets"
         C4=0.9
         ORC=0.1
         WH=0.0
+        SVO=0.0
         ;;
     1)
-        OUTPUT_DIR="results/wh_augmented_full_datasets"
+        OUTPUT_DIR="results/wh_augmented_good_datasets"
         C4=0.9
         ORC=0.0
-        WH=0.1
+        SVO=0.0
         ;;
     2)
-        OUTPUT_DIR="results/both_augmented_full_datasets"
+        OUTPUT_DIR="results/both_augmented_good_datasets"
         C4=0.9
         ORC=0.05
         WH=0.05
+        SVO=0.0
         ;;
     3)
-        OUTPUT_DIR="results/baseline_full_datasets"
-        C4=1.0
+        OUTPUT_DIR="results/baseline_good_datasets"
+        C4=0.9
         ORC=0.0
         WH=0.0
+        SVO=0.1
         ;;
 esac
 
 echo "Running configuration ${SLURM_ARRAY_TASK_ID}"
 echo "Output: ${OUTPUT_DIR}"
-echo "C4=${C4} ORC=${ORC} WH=${WH}"
+echo "C4=${C4} ORC=${ORC} WH=${WH} SVO=${SVO}"
 
 python scripts/train/streaming_dataset.py \
     --output-dir "${OUTPUT_DIR}" \
@@ -54,6 +57,9 @@ python scripts/train/streaming_dataset.py \
     --nested-outer eval_data/short_nested_outer_english.json \
     --filler-gap-orc eval_data/filler_gap_orc.csv \
     --filler-gap-wh eval_data/filler_gap_wh.csv \
+    --probability-masses-orc eval_data/orc_test.txt \
+    --probability-masses-wh eval_data/wh_test.txt \
     --c4 "${C4}" \
     --orc "${ORC}" \
-    --wh "${WH}"
+    --wh "${WH}" \
+    --svo "${SVO}"
