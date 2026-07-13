@@ -25,8 +25,7 @@ argument_parser.add_argument("--output-dir", type=str)
 argument_parser.add_argument("--c4", type=float, default=0.9)
 argument_parser.add_argument("--orc", type=float, default=0)
 argument_parser.add_argument("--wh", type=float, default=0)
-# argument_parser.add_argument("--svo_wh", type=float, default=0.05)
-# argument_parser.add_argument("--svo_orc", type=float, default=0.05)
+argument_parser.add_argument("--svo", type=float, default=0.1)
 argument_parser.add_argument("--log-scale-n-points",   type=int, default=20)
 argument_parser.add_argument("--log-scale-start-step", type=int, default=10)
 argument_parser.add_argument("--blimp-dir",            type=str, default="eval_data/blimp_data")
@@ -37,8 +36,8 @@ argument_parser.add_argument("--filler-gap-orc",       type=str, default="eval_d
 argument_parser.add_argument("--filler-gap-wh",        type=str, default="eval_data/filler_gap_wh.csv")
 argument_parser.add_argument("--transitivity-orc",     type=str, default="eval_data/orc_transitivity.csv")
 argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractor.csv")
-argument_parser.add_argument("--probability-masses-orc", type=str, default="datasets/orc_test.txt")
-argument_parser.add_argument("--probability-masses-wh",  type=str, default="datasets/wh_test.txt")
+argument_parser.add_argument("--probability-masses-orc", type=str, default=None)
+argument_parser.add_argument("--probability-masses-wh",  type=str, default=None)
 argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
 
@@ -73,10 +72,10 @@ def _c4_val_loader():
     for ex in ds:
         yield {"text": ex["text"]}
 
-def _make_text_loader(dirpath):
+def _make_text_loader(filepath):
     """Returns an infinite-cycling loader for a line-per-sentence text file."""
     def loader():
-        ds = load_from_disk(dirpath)  # map-style, fits in RAM
+        ds = load_dataset("text", data_files=filepath, split="train")  # map-style, fits in RAM
         while True:
             for ex in ds:
                 yield {"text": ex["text"]}
@@ -186,10 +185,10 @@ class PackedStreamingDataset(TorchIterableDataset):
 
 _train_candidates = [
     (_c4_train_loader,                                  args.c4),
-    (_make_text_loader("datasets/orc_arrow"),                args.orc),
-    (_make_text_loader("datasets/wh_arrow"),                 args.wh),
-    # (_make_text_loader("datasets/wh.txt"), args.svo_wh),
-    # (_make_text_loader("datasets/orc.txt"), args.svo_orc),
+    (_make_text_loader("data/orc_good_vocab.txt"),                args.orc),
+    (_make_text_loader("data/wh_good_vocab.txt"),                 args.wh),
+    (_make_text_loader("data/merged_svo.txt"), args.svo),
+    # (_make_text_loader("data/declaratives_from_orc7.txt"), args.svo_orc),
 ]
 
 train_dataset = PackedStreamingDataset(
@@ -262,8 +261,8 @@ callbacks.append(LogScaleCallback(
     filler_gap_wh        = args.filler_gap_wh,
     transitivity_orc     = args.transitivity_orc,
     semantic_distractor  = args.semantic_distractor,
-    probability_masses_orc = None,
-    probability_masses_wh  = None,
+    probability_masses_orc = args.probability_masses_orc,
+    probability_masses_wh  = args.probability_masses_wh,
 ))
 
 trainer = Trainer(
