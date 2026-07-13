@@ -13,8 +13,11 @@
 #SBATCH --error=results/logs/error_train_streaming_%A_%a.log
 #SBATCH --output=results/logs/output_train_streaming_%A_%a.log
 
+module purge
 module load anaconda-py3/2024.06
-conda activate $WORK/envs/litgpt_jz
+
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate /linkhome/rech/genpfn01/una68ug/.conda/envs/litgpt_jz
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
