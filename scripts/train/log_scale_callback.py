@@ -170,7 +170,6 @@ def evaluate(ckpt_dir: Path, tokenizer, paradigms, results_dir: Path,
                 vocab=vocab["orc"],
                 context_fn=eval_probability_masses.get_orc_context,
                 batch_size=1024,
-                amp=True,
             )
             with open(results_dir / "probability_masses_orc.json", "w") as f:
                 json.dump(pm_orc, f)
@@ -184,7 +183,6 @@ def evaluate(ckpt_dir: Path, tokenizer, paradigms, results_dir: Path,
                 vocab=vocab["wh"],
                 context_fn=eval_probability_masses.get_wh_context,
                 batch_size=1024,
-                amp=True,
             )
             with open(results_dir / "probability_masses_wh.json", "w") as f:
                 json.dump(pm_wh, f)
