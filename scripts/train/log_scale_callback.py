@@ -216,8 +216,8 @@ class LogScaleCallback(TrainerCallback):
                  transitivity_orc=None, semantic_distractor=None):
         self.eval_steps        = log_scale_steps(max_steps, n_points, start_step)
         # Add a dense evaluation window between 1000 and 5000 (every 100 steps)
-        dense_window = set(range(1000, 5001, 100))
-        self.eval_steps.update(dense_window)
+        # dense_window = set(range(1000, 5001, 100))
+        # self.eval_steps.update(dense_window)
         self.output_dir        = Path(output_dir)
         self.tokenizer         = tokenizer
         self.results_dir       = (
