@@ -12,12 +12,11 @@
 #SBATCH --array=0-3
 #SBATCH --error=results/logs/error_train_streaming_%A_%a.log
 #SBATCH --output=results/logs/output_train_streaming_%A_%a.log
+export PATH=/lustre/fswork/projects/rech/ldh/una68ug/malo/envs/litgpt_jz/bin:$PATH
 
-module purge
-module load anaconda-py3/2024.06
-
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate /linkhome/rech/genpfn01/una68ug/.conda/envs/litgpt_jz
+export HF_HOME=/lustre/fswork/projects/rech/ldh/una68ug/malo/GTH/scripts/train/.cache
+export HF_HUB_CACHE=$HF_HOME/hub
+export HF_HUB_DISABLE_XET=1
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
