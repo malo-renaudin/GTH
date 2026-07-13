@@ -204,7 +204,6 @@ validation_dataset = PackedStreamingDataset(
     max_samples=args.eval_max_samples,
 )
 hf_config = AutoConfig.from_pretrained(args.model_name, 
-                                       cache_dir= args.cache_dir, 
                                        local_files_only=True,
                                        attn_implementation="sdpa")
 model = AutoModelForCausalLM.from_config(hf_config)
