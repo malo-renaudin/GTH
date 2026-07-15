@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --account=ldh@h100
+#SBATCH --account=ldh@v100
 #SBATCH --partition=gpu_p6
-#SBATCH --qos=qos_gpu_h100-t3
-#SBATCH --constraint=h100
+#SBATCH --qos=qos_gpu_v100-t3
+#SBATCH --constraint=v100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -21,31 +21,31 @@ export HF_HUB_DISABLE_XET=1
 case ${SLURM_ARRAY_TASK_ID} in
     0)
         OUTPUT_DIR="results/orc_augmented_good_datasets"
-        C4=0.9
-        ORC=0.1
+        C4=0.99
+        ORC=0.01
         WH=0.0
         SVO=0.0
         ;;
     1)
         OUTPUT_DIR="results/wh_augmented_good_datasets"
-        C4=0.9
+        C4=0.99
         ORC=0.0
         SVO=0.0
-        WH=0.0
+        WH=0.01
         ;;
     2)
         OUTPUT_DIR="results/both_augmented_good_datasets"
-        C4=0.9
-        ORC=0.05
-        WH=0.05
+        C4=0.99
+        ORC=0.005
+        WH=0.005
         SVO=0.0
         ;;
     3)
         OUTPUT_DIR="results/baseline_good_datasets"
-        C4=0.9
+        C4=0.99
         ORC=0.0
         WH=0.0
-        SVO=0.1
+        SVO=0.01
         ;;
 esac
 
