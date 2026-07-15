@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=ldh@v100
-#SBATCH --partition=gpu_p6
+#SBATCH --partition=gpu_p13
 #SBATCH --qos=qos_gpu_v100-t3
 #SBATCH --constraint=v100
 #SBATCH --nodes=1
