@@ -20,28 +20,28 @@ export HF_HUB_DISABLE_XET=1
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
-        OUTPUT_DIR="results/orc_augmented_good_datasets"
+        OUTPUT_DIR="results/orc_augmented_good_datasets_onepct"
         C4=0.99
         ORC=0.01
         WH=0.0
         SVO=0.0
         ;;
     1)
-        OUTPUT_DIR="results/wh_augmented_good_datasets"
+        OUTPUT_DIR="results/wh_augmented_good_datasets_onepct"
         C4=0.99
         ORC=0.0
         SVO=0.0
         WH=0.01
         ;;
     2)
-        OUTPUT_DIR="results/both_augmented_good_datasets"
+        OUTPUT_DIR="results/both_augmented_good_datasets_onepct"
         C4=0.99
         ORC=0.005
         WH=0.005
         SVO=0.0
         ;;
     3)
-        OUTPUT_DIR="results/baseline_good_datasets"
+        OUTPUT_DIR="results/baseline_good_datasets_onepct"
         C4=0.99
         ORC=0.0
         WH=0.0
