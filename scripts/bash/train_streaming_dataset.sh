@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --account=ldh@v100
-#SBATCH --partition=gpu_p13
-#SBATCH --qos=qos_gpu-t3
-#SBATCH --constraint=v100
+#SBATCH --account=ldh@h100
+#SBATCH --partition=gpu_p6
+#SBATCH --qos=qos_gpu_h100-t3
+#SBATCH --constraint=h100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
