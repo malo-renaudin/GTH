@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=ldh@h100
+#SBATCH --account=ywa@h100
 #SBATCH --partition=gpu_p6
 #SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --constraint=h100
@@ -12,11 +12,14 @@
 #SBATCH --array=0-3
 #SBATCH --error=results/logs/error_train_streaming_%A_%a.log
 #SBATCH --output=results/logs/output_train_streaming_%A_%a.log
-export PATH=/lustre/fswork/projects/rech/ldh/una68ug/malo/envs/litgpt_jz/bin:$PATH
+# export PATH=/lustre/fswork/projects/rech/ldh/una68ug/malo/envs/litgpt_jz/bin:$PATH
 
-export HF_HOME=/lustre/fswork/projects/rech/ldh/una68ug/malo/GTH/scripts/train/.cache
-export HF_HUB_CACHE=$HF_HOME/hub
-export HF_HUB_DISABLE_XET=1
+# export HF_HOME=/lustre/fswork/projects/rech/ldh/una68ug/malo/GTH/scripts/train/.cache
+# export HF_HUB_CACHE=$HF_HOME/hub
+# export HF_HUB_DISABLE_XET=1
+
+source $WORK/miniconda3/etc/profile.d/conda.sh
+conda activate litgpt_jz
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
