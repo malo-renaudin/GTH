@@ -52,7 +52,7 @@ def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
         for a1, a2, ad1 in combos:
             # Template 1: What/Who/Whom variants (filtered by verb requirements)
             for wh_word in wh_words:
-                q_wh_n1 = f"{wh_word} {aux} the {a1} {curr_n1} {ad1} {v_fin}?"
+                q_wh_n1 = f"{wh_word} {aux} the {a1} {a2} {curr_n1} {ad1} {v_fin}?"
                 results.append(" ".join(q_wh_n1.split()).capitalize())
             
             # Template 2: Which (N1 is Subject, N2 is Object)
@@ -73,7 +73,7 @@ def generate_wh_variants(n1, n2, v_pair, adj1, adj2, adv1, n1_plur, n2_plur):
             for a1, a2, ad1 in combos:
                 # Template 1: What/Who/Whom variants
                 for wh_word in wh_words:
-                    q_wh_n2 = f"{wh_word} {aux} the {a2} {curr_n2} {ad1} {v_fin}?"
+                    q_wh_n2 = f"{wh_word} {aux} the {a1} {a2} {curr_n2} {ad1} {v_fin}?"
                     results.append(" ".join(q_wh_n2.split()).capitalize())
             
     return results

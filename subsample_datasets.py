@@ -1,24 +1,23 @@
 import random
-import subprocess
 from pathlib import Path
 
 # Define input and output paths for subsampling datasets
-DATA_DIR = Path("datasets")
-ORC_SRC = DATA_DIR / "orc.txt"
-WH_SRC = DATA_DIR / "wh.txt"
+# DATA_DIR = Path("datasets")
+ORC_SRC = "orc_good_vocab.txt"
+WH_SRC = "wh_balanced.txt"
 
-ORC_FINAL = DATA_DIR / "orc_final.txt"
-WH_FINAL = DATA_DIR / "wh_final.txt"
-ORC_TEST = DATA_DIR / "orc_test.txt"
-WH_TEST = DATA_DIR / "wh_test.txt"
+ORC_FINAL = "orc_final_1.txt"
+WH_FINAL = "wh_final_1.txt"
+ORC_TEST = "orc_test_1.txt"
+WH_TEST = "wh_test_1.txt"
 
 IO_BUFFER = 8 << 20  # 8 MB read/write buffers
 
 
 def count_lines(file_path):
-    """Count lines via wc -l — native C speed, no file loaded into memory."""
-    out = subprocess.check_output(["wc", "-l", str(file_path)])
-    return int(out.split()[0])
+    """Count lines in a single streaming pass — no full-file load into memory."""
+    with open(file_path, "r", encoding="utf-8", buffering=IO_BUFFER) as f:
+        return sum(1 for _ in f)
 
 
 def stream_split(src_path, test_idx_set, test_path, final_path,
@@ -79,15 +78,15 @@ def main():
     print("\nStreaming ORC (1 pass)...")
     stream_split(ORC_SRC, orc_test_idx, ORC_TEST, ORC_FINAL,
                  orc_total, final_count=target_count)
-    print(f"  -> {ORC_TEST.name}: 1,000 lines")
-    print(f"  -> {ORC_FINAL.name}: {target_count:,} lines")
+    print(f"  -> {ORC_TEST}: 1,000 lines")
+    print(f"  -> {ORC_FINAL}: {target_count:,} lines")
 
     print("\nStreaming WH (1 pass)...")
     stream_split(WH_SRC, wh_test_idx, WH_TEST, WH_FINAL,
                  wh_total, final_count=target_count)
     wh_final_count = min(target_count, wh_available)
-    print(f"  -> {WH_TEST.name}: 1,000 lines")
-    print(f"  -> {WH_FINAL.name}: {wh_final_count:,} lines")
+    print(f"  -> {WH_TEST}: 1,000 lines")
+    print(f"  -> {WH_FINAL}: {wh_final_count:,} lines")
 
     print("\nDone!")
 

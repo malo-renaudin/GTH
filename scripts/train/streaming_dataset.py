@@ -32,12 +32,16 @@ argument_parser.add_argument("--blimp-dir",            type=str, default="eval_d
 argument_parser.add_argument("--nested-inner",         type=str, default="eval_data/short_nested_inner_english.json")
 argument_parser.add_argument("--nested-outer",         type=str, default="eval_data/short_nested_outer_english.json")
 argument_parser.add_argument("--locality",             type=str, default="eval_data/locality.json")
-argument_parser.add_argument("--filler-gap-orc",       type=str, default="eval_data/filler_gap_orc.csv")
-argument_parser.add_argument("--filler-gap-wh",        type=str, default="eval_data/filler_gap_wh.csv")
+argument_parser.add_argument("--filler-gap-orc-iv",   type=str, default="eval_data/filler_gap_factorial_iv.csv")
+argument_parser.add_argument("--filler-gap-orc-oov",  type=str, default="eval_data/filler_gap_factorial_oov.csv")
+argument_parser.add_argument("--filler-gap-wh-iv",    type=str, default="eval_data/wh_movement_factorial_iv.csv")
+argument_parser.add_argument("--filler-gap-wh-oov",   type=str, default="eval_data/wh_movement_factorial_oov.csv")
 argument_parser.add_argument("--transitivity-orc",     type=str, default="eval_data/orc_transitivity.csv")
 argument_parser.add_argument("--semantic-distractor",  type=str, default="eval_data/orc_semantic_distractor.csv")
-argument_parser.add_argument("--probability-masses-orc", type=str, default="eval_data/orc_test.txt")
-argument_parser.add_argument("--probability-masses-wh",  type=str, default="eval_data/wh_test.txt")
+argument_parser.add_argument("--probability-masses-orc-iv",  type=str, default="eval_data/orc_test.txt")
+argument_parser.add_argument("--probability-masses-orc-oov", type=str, default=None)
+argument_parser.add_argument("--probability-masses-wh-iv",   type=str, default="eval_data/wh_test.txt")
+argument_parser.add_argument("--probability-masses-wh-oov",  type=str, default=None)
 argument_parser.add_argument("--eval-max-samples",     type=int, default=500)
 args = argument_parser.parse_args()
 
@@ -185,8 +189,8 @@ class PackedStreamingDataset(TorchIterableDataset):
 
 _train_candidates = [
     (_c4_train_loader,                                  args.c4),
-    (_make_text_loader("data/orc_good_vocab.txt"),                args.orc),
-    (_make_text_loader("data/wh_good_vocab.txt"),                 args.wh),
+    (_make_text_loader("data/orc_final_1.txt"),                args.orc),
+    (_make_text_loader("data/wh_final_1.txt"),                 args.wh),
     (_make_text_loader("data/merged_svo.txt"), args.svo),
     # (_make_text_loader("data/declaratives_from_orc7.txt"), args.svo_orc),
 ]
@@ -256,12 +260,16 @@ callbacks.append(LogScaleCallback(
     nested_inner         = args.nested_inner,
     nested_outer         = args.nested_outer,
     locality             = args.locality,
-    filler_gap_orc       = args.filler_gap_orc,
-    filler_gap_wh        = args.filler_gap_wh,
-    transitivity_orc     = args.transitivity_orc,
-    semantic_distractor  = args.semantic_distractor,
-    probability_masses_orc = args.probability_masses_orc,
-    probability_masses_wh  = args.probability_masses_wh,
+    filler_gap_orc_iv          = args.filler_gap_orc_iv,
+    filler_gap_orc_oov         = args.filler_gap_orc_oov,
+    filler_gap_wh_iv           = args.filler_gap_wh_iv,
+    filler_gap_wh_oov          = args.filler_gap_wh_oov,
+    transitivity_orc           = args.transitivity_orc,
+    semantic_distractor        = args.semantic_distractor,
+    probability_masses_orc_iv  = args.probability_masses_orc_iv,
+    probability_masses_orc_oov = args.probability_masses_orc_oov,
+    probability_masses_wh_iv   = args.probability_masses_wh_iv,
+    probability_masses_wh_oov  = args.probability_masses_wh_oov,
 ))
 
 trainer = Trainer(

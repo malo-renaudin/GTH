@@ -52,6 +52,21 @@ adj1_opts_wh = ["big", "tall", "young", "strong", "kind"]
 adj2_opts_wh = ["beautiful", "smart", "brave", "famous", "honest"]
 adv1_opts_wh = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
 
+# ORC OOV vocabulary (matches --vocab oov in filler_gap_orc.py)
+# Nouns: purely nominal (cannot be verbed); verb bases are not nouns
+n1_opts_orc_oov   = ["stranger", "passenger", "prisoner", "soldier", "customer"]
+n2_opts_orc_oov   = ["winner", "victim", "scholar", "tourist", "patron"]
+v_opts_orc_oov    = [("ignores", "ignore"), ("examines", "examine"), ("inspires", "inspire"), ("protects", "protect"), ("describes", "describe")]
+cont_sing_orc_oov = ["is angry", "is anxious", "is silent", "is nervous", "is peaceful"]
+cont_plur_orc_oov = ["are angry", "are anxious", "are silent", "are nervous", "are peaceful"]
+# WH OOV vocabulary (matches --vocab oov in filler_gap_wh.py)
+# Nouns: purely nominal; verb base and -ing form are not nouns
+n_opts_wh_oov  = ["stranger", "passenger", "prisoner", "soldier", "customer",
+                   "winner", "victim", "scholar", "tourist", "patron"]
+v_opts_wh_oov  = [("ignore", "ignored", "ignoring"), ("examine", "examined", "examining"),
+                   ("inspire", "inspired", "inspiring"), ("prefer", "preferred", "preferring"),
+                   ("describe", "described", "describing")]
+
 
 
 def pluralize_noun(noun: str) -> str:
@@ -149,10 +164,16 @@ def compute_candidates_log_sums(
     return results
 
 
-def build_orc_candidates():
+def build_orc_candidates(vocab: str = "iv"):
+    if vocab == "oov":
+        n1_opts, n2_opts = n1_opts_orc_oov, n2_opts_orc_oov
+        cont_sing, cont_plur = cont_sing_orc_oov, cont_plur_orc_oov
+    else:
+        n1_opts, n2_opts = n1_opts_orc, n2_opts_orc
+        cont_sing, cont_plur = cont_sing_orc, cont_plur_orc
     # NP candidates: "the" + optional adj (from both adj lists) + noun (sing & plur)
     adj_options = [""] + adj1_opts_orc + adj2_opts_orc
-    nouns = list(n1_opts_orc) + list(n2_opts_orc)
+    nouns = list(n1_opts) + list(n2_opts)
     np_candidates = []
     for adj in adj_options:
         for n in nouns:
@@ -163,7 +184,7 @@ def build_orc_candidates():
                     np_candidates.append(f"the {noun_variant}")
 
     # VP candidates: use the continuations used by the generator
-    vp_candidates = list(cont_sing_orc) + list(cont_plur_orc)
+    vp_candidates = list(cont_sing) + list(cont_plur)
 
     # question mark candidate
     q_candidate = ["?"]
@@ -171,9 +192,14 @@ def build_orc_candidates():
     return np_candidates, vp_candidates, q_candidate
 
 
-def build_wh_candidates():
+def build_wh_candidates(vocab: str = "iv"):
+    if vocab == "oov":
+        nouns  = n_opts_wh_oov
+        v_pairs = v_opts_wh_oov
+    else:
+        nouns  = list(n1_opts_wh) + list(n2_opts_wh)
+        v_pairs = v_opts_wh
     adj_options = [""] + adj1_opts_wh + adj2_opts_wh
-    nouns = list(n1_opts_wh) + list(n2_opts_wh)
     np_candidates = []
     for adj in adj_options:
         for n in nouns:
@@ -185,7 +211,7 @@ def build_wh_candidates():
 
     # VP candidates: combine auxiliaries and verb forms from the generator
     vp_candidates = []
-    for base, past, ing in v_opts_wh:
+    for base, past, ing in v_pairs:
         vp_candidates.extend([base, past, ing, f"did {base}", f"does {base}", f"do {base}", f"is {ing}", f"are {ing}"])
     # deduplicate while preserving order
     seen = set()
@@ -195,13 +221,14 @@ def build_wh_candidates():
     return np_candidates, vp_candidates, q_candidate
 
 
-def find_orc_context(sentence: str) -> str:
+def find_orc_context(sentence: str, vocab: str = "iv") -> str:
     """Return substring up to and including the first verb (based on v_opts_orc).
     If no verb is found, return the whole sentence as a fallback.
     """
     lower = sentence.lower()
+    verb_pairs = v_opts_orc_oov if vocab == "oov" else v_opts_orc
     verb_forms = set()
-    for sing, base in v_opts_orc:
+    for sing, base in verb_pairs:
         verb_forms.add(sing)
         verb_forms.add(base)
 
@@ -232,14 +259,14 @@ def ids_for_text(tokenizer, text: str) -> List[int]:
     return tokenizer(text, add_special_tokens=False).input_ids
 
 
-def build_vocabulary():
+def build_vocabulary(vocab: str = "iv"):
     """Return a dict with prebuilt candidate lists for ORC and WH evaluations.
 
     The callback expects build_vocabulary()["orc"] and build_vocabulary()["wh"]
     to be passed to `process_dataset()`.
     """
-    orc_np, orc_vp, orc_q = build_orc_candidates()
-    wh_np, wh_vp, wh_q = build_wh_candidates()
+    orc_np, orc_vp, orc_q = build_orc_candidates(vocab)
+    wh_np, wh_vp, wh_q = build_wh_candidates(vocab)
     return {
         "orc": {"np": orc_np, "vp": orc_vp, "q": orc_q},
         "wh":  {"np": wh_np,  "vp": wh_vp,  "q":  wh_q},
@@ -391,11 +418,12 @@ def evaluate_sentences(
     out_rows: List[dict],
     sent_limit: int = None,
     cand_batch_size: int = 64,
+    vocab: str = "iv",
 ):
     if domain == "orc":
-        np_cands, vp_cands, q_cand = build_orc_candidates()
+        np_cands, vp_cands, q_cand = build_orc_candidates(vocab)
     else:
-        np_cands, vp_cands, q_cand = build_wh_candidates()
+        np_cands, vp_cands, q_cand = build_wh_candidates(vocab)
 
     with open(filename, "r", encoding="utf-8") as f:
         lines = [l.strip() for l in f if l.strip()]
@@ -405,7 +433,7 @@ def evaluate_sentences(
 
     for i, sent in enumerate(tqdm.tqdm(lines, desc=f"Eval {domain}")):
         if domain == "orc":
-            context = find_orc_context(sent)
+            context = find_orc_context(sent, vocab)
         else:
             context = find_wh_context(sent)
 
@@ -510,14 +538,16 @@ def main():
     p.add_argument("--device", default=None, help="torch device, e.g. cpu or cuda")
     p.add_argument("--sent_limit", type=int, default=None, help="Limit number of sentences per file (for debugging)")
     p.add_argument("--cand_batch_size", type=int, default=64, help="Batch size for candidate evaluation")
+    p.add_argument("--vocab", default="iv", choices=["iv", "oov"],
+                   help="'iv' = in-vocabulary candidates; 'oov' = out-of-vocabulary candidates.")
     args = p.parse_args()
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer, model = _load_model_and_tokenizer(args.checkpoint, device)
 
     rows: List[dict] = []
-    evaluate_sentences(args.orc_test, "orc", tokenizer, model, device, rows, sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size)
-    evaluate_sentences(args.wh_test, "wh", tokenizer, model, device, rows, sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size)
+    evaluate_sentences(args.orc_test, "orc", tokenizer, model, device, rows, sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size, vocab=args.vocab)
+    evaluate_sentences(args.wh_test, "wh", tokenizer, model, device, rows, sent_limit=args.sent_limit, cand_batch_size=args.cand_batch_size, vocab=args.vocab)
 
     # write CSV
     fieldnames = ["file", "idx", "sentence", "context", "np_mass", "vp_mass", "q_mass", "np_count", "vp_count"]
