@@ -34,38 +34,74 @@ import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-# --- Vocabulary copied (unchanged) from the generation scripts ---
-# ORC vocabulary (from generate_simple_datasets/orc.py)
-n1_opts_orc = ["boy", "student", "doctor", "artist", "athlete"]
-n2_opts_orc = ["girl", "child", "professor", "scientist", "neighbor"] # 'child' requires an irregular plural check
-v_opts_orc = [("sees", "see"), ("admires", "admire"), ("avoids", "avoid"), ("observes", "observe"), ("greets", "greet")]
-adj1_opts_orc = ["big", "tall", "young", "strong", "kind"]
-adj2_opts_orc = ["beautiful", "smart", "brave", "famous", "honest"]
-adv1_opts_orc = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
-cont_sing_orc = ["is eating", "is watching", "is reading", "likes", "enjoys", "likes"]
-cont_plur_orc = ["are eating", "are watching", "are reading", "like", "enjoy", "like"]
-# WH vocabulary (from generate_simple_datasets/wh.py)
-n1_opts_wh = ["boy", "student", "doctor", "artist", "athlete"]
-n2_opts_wh = ["girl", "child", "professor", "scientist", "neighbor"] # 'child' requires an irregular plural check
-v_opts_wh = [("see", "saw", "seeing"), ("admire", "admired", "admiring"), ("avoid", "avoided", "avoiding"), ("observe", "observed", "observing"), ("greet", "greeted", "greeting")]
-adj1_opts_wh = ["big", "tall", "young", "strong", "kind"]
-adj2_opts_wh = ["beautiful", "smart", "brave", "famous", "honest"]
-adv1_opts_wh = ["possibly", "apparently", "secretly", "always", "often", "rarely"]
+# --- Vocabulary copied from the current generation scripts ---
+# ORC IV vocabulary (from generate_simple_datasets/orc.py --vocab-set v2)
+n1_opts_orc_iv = ["boy", "student", "doctor", "artist", "athlete"]
+n2_opts_orc_iv = ["girl", "child", "monk", "guard", "clerk"]
+v_opts_orc_iv = [
+    ("sees", "see", "saw", "seeing"),
+    ("finds", "find", "found", "finding"),
+    ("hears", "hear", "heard", "hearing"),
+    ("helps", "help", "helped", "helping"),
+    ("meets", "meet", "met", "meeting"),
+]
+adj1_opts_orc_iv = ["big", "tall", "young", "strong", "kind"]
+adj2_opts_orc_iv = ["beautiful", "smart", "brave", "famous", "honest"]
+cont_sing_orc_iv = [
+    "is eating an apple",
+    "is watching a movie",
+    "is reading a book",
+    "likes to dance",
+    "enjoys music",
+    "likes climbing",
+]
+cont_plur_orc_iv = [
+    "are eating an apple",
+    "are watching a movie",
+    "are reading a book",
+    "like to dance",
+    "enjoy music",
+    "like climbing",
+]
 
-# ORC OOV vocabulary (matches --vocab oov in filler_gap_orc.py)
-# Nouns: purely nominal (cannot be verbed); verb bases are not nouns
-n1_opts_orc_oov   = ["stranger", "passenger", "prisoner", "soldier", "customer"]
-n2_opts_orc_oov   = ["winner", "victim", "scholar", "tourist", "patron"]
-v_opts_orc_oov    = [("ignores", "ignore"), ("examines", "examine"), ("inspires", "inspire"), ("protects", "protect"), ("describes", "describe")]
+# ORC OOV vocabulary (matches generate_simple_datasets/filler_gap_orc.py --vocab oov)
+n1_opts_orc_oov = ["judge", "nurse", "cook", "chef", "baker"]
+n2_opts_orc_oov = ["pilot", "sailor", "hunter", "trader", "ranger"]
+v_opts_orc_oov = [
+    ("beats", "beat", "beat", "beating"),
+    ("reads", "read", "read", "reading"),
+    ("serves", "serve", "served", "serving"),
+    ("seeks", "seek", "sought", "seeking"),
+    ("trains", "train", "trained", "training"),
+]
 cont_sing_orc_oov = ["is angry", "is anxious", "is silent", "is nervous", "is peaceful"]
 cont_plur_orc_oov = ["are angry", "are anxious", "are silent", "are nervous", "are peaceful"]
-# WH OOV vocabulary (matches --vocab oov in filler_gap_wh.py)
-# Nouns: purely nominal; verb base and -ing form are not nouns
-n_opts_wh_oov  = ["stranger", "passenger", "prisoner", "soldier", "customer",
-                   "winner", "victim", "scholar", "tourist", "patron"]
-v_opts_wh_oov  = [("ignore", "ignored", "ignoring"), ("examine", "examined", "examining"),
-                   ("inspire", "inspired", "inspiring"), ("prefer", "preferred", "preferring"),
-                   ("describe", "described", "describing")]
+
+# WH IV vocabulary (from generate_simple_datasets/wh.py --vocab-set v2)
+n1_opts_wh_iv = ["man", "dancer", "singer", "writer", "knight"]
+n2_opts_wh_iv = ["woman", "lord", "king", "queen", "pope"]
+v_opts_wh_iv = [
+    ("know", "knew", "knowing"),
+    ("keep", "kept", "keeping"),
+    ("lead", "led", "leading"),
+    ("make", "made", "making"),
+    ("send", "sent", "sending"),
+]
+adj1_opts_wh_iv = ["old", "short", "thin", "bold", "lean"]
+adj2_opts_wh_iv = ["wise", "noble", "proud", "calm", "loyal"]
+
+# WH OOV vocabulary (matches generate_simple_datasets/filler_gap_wh.py --vocab oov)
+n_opts_wh_oov = [
+    "miner", "farmer", "rider", "driver", "painter",
+    "fighter", "builder", "healer", "manager", "officer",
+]
+v_opts_wh_oov = [
+    ("hold", "held", "holding"),
+    ("take", "took", "taking"),
+    ("give", "gave", "giving"),
+    ("pull", "pulled", "pulling"),
+    ("show", "showed", "showing"),
+]
 
 
 
@@ -99,6 +135,24 @@ def _load_model_and_tokenizer(checkpoint: str, device: str):
 
 def _concat_ids(a: List[int], b: List[int]) -> List[int]:
     return a + b
+
+
+def _find_earliest_phrase(sentence: str, phrases: List[str]) -> str:
+    lower = sentence.lower()
+    best_start = None
+    best_end = None
+
+    for phrase in phrases:
+        pattern = r"\b" + re.escape(phrase) + r"\b"
+        for match in re.finditer(pattern, lower):
+            start, end = match.start(), match.end()
+            if best_start is None or start < best_start or (start == best_start and end > best_end):
+                best_start = start
+                best_end = end
+
+    if best_start is None:
+        return sentence.strip()
+    return sentence[:best_end].rstrip()
 
 
 def compute_candidates_log_sums(
@@ -168,11 +222,12 @@ def build_orc_candidates(vocab: str = "iv"):
     if vocab == "oov":
         n1_opts, n2_opts = n1_opts_orc_oov, n2_opts_orc_oov
         cont_sing, cont_plur = cont_sing_orc_oov, cont_plur_orc_oov
+        adj_options = [""]
     else:
-        n1_opts, n2_opts = n1_opts_orc, n2_opts_orc
-        cont_sing, cont_plur = cont_sing_orc, cont_plur_orc
+        n1_opts, n2_opts = n1_opts_orc_iv, n2_opts_orc_iv
+        cont_sing, cont_plur = cont_sing_orc_iv, cont_plur_orc_iv
+        adj_options = [""] + adj1_opts_orc_iv + adj2_opts_orc_iv
     # NP candidates: "the" + optional adj (from both adj lists) + noun (sing & plur)
-    adj_options = [""] + adj1_opts_orc + adj2_opts_orc
     nouns = list(n1_opts) + list(n2_opts)
     np_candidates = []
     for adj in adj_options:
@@ -196,10 +251,11 @@ def build_wh_candidates(vocab: str = "iv"):
     if vocab == "oov":
         nouns  = n_opts_wh_oov
         v_pairs = v_opts_wh_oov
+        adj_options = [""]
     else:
-        nouns  = list(n1_opts_wh) + list(n2_opts_wh)
-        v_pairs = v_opts_wh
-    adj_options = [""] + adj1_opts_wh + adj2_opts_wh
+        nouns  = list(n1_opts_wh_iv) + list(n2_opts_wh_iv)
+        v_pairs = v_opts_wh_iv
+        adj_options = [""] + adj1_opts_wh_iv + adj2_opts_wh_iv
     np_candidates = []
     for adj in adj_options:
         for n in nouns:
@@ -225,26 +281,11 @@ def find_orc_context(sentence: str, vocab: str = "iv") -> str:
     """Return substring up to and including the first verb (based on v_opts_orc).
     If no verb is found, return the whole sentence as a fallback.
     """
-    lower = sentence.lower()
-    verb_pairs = v_opts_orc_oov if vocab == "oov" else v_opts_orc
-    verb_forms = set()
-    for sing, base in verb_pairs:
-        verb_forms.add(sing)
-        verb_forms.add(base)
+    verb_phrases = []
+    for sing, base, past, ing in v_opts_orc_iv + v_opts_orc_oov:
+        verb_phrases.extend([sing, base, past, ing])
 
-    earliest = None
-    match_end = None
-    for vf in verb_forms:
-        m = re.search(r"\b" + re.escape(vf) + r"\b", lower)
-        if m:
-            if earliest is None or m.start() < earliest:
-                earliest = m.start()
-                match_end = m.end()
-
-    if earliest is None:
-        # fallback: use first verb-like token (very unlikely for generated data)
-        return sentence.strip()
-    return sentence[:match_end].rstrip()
+    return _find_earliest_phrase(sentence, verb_phrases)
 
 
 def find_wh_context(sentence: str) -> str:

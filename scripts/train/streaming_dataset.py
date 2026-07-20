@@ -189,9 +189,9 @@ class PackedStreamingDataset(TorchIterableDataset):
 
 _train_candidates = [
     (_c4_train_loader,                                  args.c4),
-    (_make_text_loader("data/orc_final_1.txt"),                args.orc),
-    (_make_text_loader("data/wh_final_1.txt"),                 args.wh),
-    (_make_text_loader("data/merged_svo.txt"), args.svo),
+    (_make_text_loader("data/orc_final_2.txt"),                args.orc),
+    (_make_text_loader("data/wh_final_2.txt"),                 args.wh),
+    (_make_text_loader("data/svo_final_2.txt"), args.svo),
     # (_make_text_loader("data/declaratives_from_orc7.txt"), args.svo_orc),
 ]
 
@@ -223,7 +223,7 @@ training_args = TrainingArguments(
     lr_scheduler_type="cosine",
     learning_rate=config.get("learning_rate", 5e-5),#grid
     # num_train_epochs=config.get("num_train_epochs", 3),
-    max_steps=30500,
+    max_steps=23000,
     weight_decay=config.get("weight_decay", 0.1),
     adam_beta2=config.get("adam_beta2", 0.95),
     logging_steps=config.get("logging_steps", 50),
