@@ -23,28 +23,28 @@ conda activate litgpt_jz
 
 case ${SLURM_ARRAY_TASK_ID} in
     0)
-        OUTPUT_DIR="results/orc_05_disjoint"
+        OUTPUT_DIR="results/orc_05_ckpt"
         C4=0.97
         ORC=0.005
         WH=0.0
         SVO=0.025
         ;;
     1)
-        OUTPUT_DIR="results/orc_1_disjoint"
+        OUTPUT_DIR="results/orc_1_ckpt"
         C4=0.97
         ORC=0.01
         SVO=0.02
         WH=0.0
         ;;
     2)
-        OUTPUT_DIR="results/orc_3_disjoint"
+        OUTPUT_DIR="results/orc_3_ckpt"
         C4=0.97
         ORC=0.03
         WH=0.0
         SVO=0.0
         ;;
     3)
-        OUTPUT_DIR="results/wh_05_disjoint"
+        OUTPUT_DIR="results/wh_05_ckpt"
         C4=0.97
         ORC=0.0
         WH=0.005
@@ -52,14 +52,14 @@ case ${SLURM_ARRAY_TASK_ID} in
         ;;
 
     4)
-        OUTPUT_DIR="results/wh_1_disjoint"
+        OUTPUT_DIR="results/wh_1_ckpt"
         C4=0.97
         ORC=0.0
         WH=0.01
         SVO=0.02
         ;;
     5)
-        OUTPUT_DIR="results/wh_3_disjoint"
+        OUTPUT_DIR="results/wh_3_ckpt"
         C4=0.97
         ORC=0.0
         WH=0.03
@@ -67,21 +67,21 @@ case ${SLURM_ARRAY_TASK_ID} in
         ;;
     
     6)
-        OUTPUT_DIR="results/baseline_disjoint"
+        OUTPUT_DIR="results/baseline_ckpt"
         C4=0.97
         ORC=0.0
         WH=0.0
         SVO=0.03
         ;;
     7)
-        OUTPUT_DIR="results/orc_01_disjoint"
+        OUTPUT_DIR="results/orc_01_ckpt"
         C4=0.97
         ORC=0.001
         WH=0.0
         SVO=0.029
         ;;
     8)
-        OUTPUT_DIR="results/wh_01_disjoint"
+        OUTPUT_DIR="results/wh_01_ckpt"
         C4=0.97
         ORC=0.0
         WH=0.001
@@ -102,10 +102,10 @@ python scripts/train/streaming_dataset.py \
     --filler-gap-orc-oov eval_data/orc_factorial_oov.csv \
     --filler-gap-wh-iv eval_data/wh_factorial_iv.csv \
     --filler-gap-wh-oov eval_data/wh_factorial_oov.csv \
-    --probability-masses-orc-iv eval_data/orc_test_2.txt \
-    --probability-masses-orc-oov eval_data/orc_test_oov_1000.txt \
-    --probability-masses-wh-iv eval_data/wh_test_2.txt \
-    --probability-masses-wh-oov eval_data/wh_test_oov_1000.txt \
+    --probability-masses-orc-iv None \
+    --probability-masses-orc-oov None\
+    --probability-masses-wh-iv None\
+    --probability-masses-wh-oov None \
     --c4 "${C4}" \
     --orc "${ORC}" \
     --wh "${WH}" \

@@ -33,7 +33,8 @@ _NESTED_CATS = ["plural_plural", "plural_singular", "singular_plural", "singular
 # ---------------------------------------------------------------------------
 
 def log_scale_steps(max_steps: int, n_points: int, start_step: int):
-    steps = {int(round(x)) for x in np.geomspace(start_step, max_steps, n_points)}
+    del n_points, start_step
+    steps = set(range(200, max_steps + 1, 200))
     steps.add(max_steps)
     return steps
 
