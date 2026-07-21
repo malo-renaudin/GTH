@@ -69,10 +69,10 @@ p.add_argument("--output-dir", required=True, type=Path,
 p.add_argument("--batch-size", type=int, default=32)
 
 # Filler-gap data files — pass 'none' to skip any single eval.
-p.add_argument("--filler-gap-orc-iv",  type=_none_or_path, default=Path("eval_data/filler_gap_factorial_iv.csv"))
-p.add_argument("--filler-gap-orc-oov", type=_none_or_path, default=Path("eval_data/filler_gap_factorial_oov.csv"))
-p.add_argument("--filler-gap-wh-iv",   type=_none_or_path, default=Path("eval_data/wh_movement_factorial_iv.csv"))
-p.add_argument("--filler-gap-wh-oov",  type=_none_or_path, default=Path("eval_data/wh_movement_factorial_oov.csv"))
+p.add_argument("--filler-gap-orc-iv",  type=_none_or_path, default=Path("eval_data/orc_factorial_iv.csv"))
+p.add_argument("--filler-gap-orc-oov", type=_none_or_path, default=Path("eval_data/orc_factorial_oov.csv"))
+p.add_argument("--filler-gap-wh-iv",   type=_none_or_path, default=Path("eval_data/wh_factorial_iv.csv"))
+p.add_argument("--filler-gap-wh-oov",  type=_none_or_path, default=Path("eval_data/wh_factorial_oov.csv"))
 
 args = p.parse_args()
 
