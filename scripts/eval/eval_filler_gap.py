@@ -175,7 +175,10 @@ def run_checkpoint(ckpt_dir: Path, tokenizer, rows: List[dict],
                    model=None) -> Tuple[List[dict], List[dict]]:
     """Returns (surprisal_rows, lme_rows)."""
     name = ckpt_dir.name
-    step = int(name.split("-")[-1]) if "-" in name else 0
+    try:
+        step = int(name.split("-")[-1]) if "-" in name else 0
+    except ValueError:
+        step = 0
     print(f"\n=== {name} (step {step}) ===")
     loaded_here = False
     if model is None:
