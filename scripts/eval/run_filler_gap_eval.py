@@ -85,11 +85,11 @@ print(f"Device: {device}")
 
 tok_name = args.tokenizer or args.model
 print(f"Loading tokenizer from: {tok_name}")
-tokenizer = AutoTokenizer.from_pretrained(tok_name)
+tokenizer = AutoTokenizer.from_pretrained(tok_name, local_files_only=True)
 tokenizer.pad_token = tokenizer.eos_token
 
 print(f"Loading model from: {args.model}")
-model = AutoModelForCausalLM.from_pretrained(args.model).to(device)
+model = AutoModelForCausalLM.from_pretrained(args.model, local_files_only=True).to(device)
 model.eval()
 
 args.output_dir.mkdir(parents=True, exist_ok=True)
