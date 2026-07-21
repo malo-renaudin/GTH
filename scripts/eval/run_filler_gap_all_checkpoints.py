@@ -87,7 +87,7 @@ p.add_argument("--batch-size", type=int, default=32)
 p.add_argument("--filler-gap-orc-iv",  type=_none_or_path, default=Path("eval_data/orc_factorial_iv.csv"))
 p.add_argument("--filler-gap-orc-oov", type=_none_or_path, default=Path("eval_data/orc_factorial_oov.csv"))
 p.add_argument("--filler-gap-wh-iv",   type=_none_or_path, default=Path("eval_data/wh_factorial_iv.csv"))
-p.add_argument("--filler-gap-wh-oov",  type=_none_or_path, default=Path("eval_data/wh_factorial_oov.csv"))
+p.add_argument("--filler-gap-wh-oov",  type=_none_or_path, default=Path("eval_data/embedded_wh_fg_test.csv"))
 
 args = p.parse_args()
 
