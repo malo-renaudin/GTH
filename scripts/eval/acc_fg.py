@@ -244,10 +244,10 @@ for ckpt in checkpoint_paths:
             )
 
             scores.append(score)
-            fg.append(S_filler_no_gap - S_filler_gap)
-            f_no_g.append(S_filler_no_gap - S_filler_gap)
-            no_f_g.append(S_no_filler_no_gap - S_no_filler_gap)
-            no_f_no_g.append(S_no_filler_no_gap - S_no_filler_gap)
+            fg.append(S_filler_gap)
+            f_no_g.append(S_filler_no_gap)
+            no_f_g.append(S_no_filler_gap)
+            no_f_no_g.append(S_no_filler_no_gap)
 
 
         scores = pd.Series(scores)
