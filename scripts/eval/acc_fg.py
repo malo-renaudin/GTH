@@ -230,7 +230,7 @@ for ckpt in checkpoint_paths:
         )
 
         scores.append(score)
-
+    print("accuracy: ", (pd.Series(scores) > 0).mean())
 
     scores = pd.Series(scores)
 
