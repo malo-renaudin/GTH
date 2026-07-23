@@ -263,3 +263,15 @@ for ckpt in checkpoint_paths:
 
     del model
     torch.cuda.empty_cache()
+
+results_df = pd.DataFrame(results)
+
+print("\nFinal results:")
+print(results_df)
+
+results_df.to_csv(
+    output_file,
+    index=False
+)
+
+print(f"\nSaved results to {output_file}")
