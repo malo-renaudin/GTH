@@ -172,6 +172,8 @@ for ckpt in checkpoint_paths:
     model.eval()
 
     subset_accuracies = []
+    subset_delta_filler_accuracies = []
+    subset_delta_no_filler_accuracies = []
     subset_scores = []
 
     for data_file in data_files:
@@ -222,7 +224,8 @@ for ckpt in checkpoint_paths:
 
 
         scores = []
-
+        delta_filler = []
+        delta_no_filler = []
         for i in range(len(quad_ids)):
 
             S_filler_gap = surprisals[4*i]
@@ -237,12 +240,18 @@ for ckpt in checkpoint_paths:
             )
 
             scores.append(score)
+            delta_filler.append(S_filler_no_gap - S_filler_gap)
+            delta_no_filler.append(S_no_filler_no_gap - S_no_filler_gap)
 
 
         scores = pd.Series(scores)
-
+        delta_filler = pd.Series(delta_filler)
+        delta_no_filler = pd.Series(delta_no_filler)
         subset_acc = (scores > 0).mean()
-
+        subset_delta_filler_acc = (delta_filler > 0).mean()
+        subset_delta_filler_accuracies.append(subset_delta_filler_acc)
+        subset_delta_no_filler_acc = (delta_no_filler < 0).mean()
+        subset_delta_no_filler_accuracies.append(subset_delta_no_filler_acc)
         subset_accuracies.append(subset_acc)
         subset_scores.extend(scores.tolist())
 
@@ -256,6 +265,10 @@ for ckpt in checkpoint_paths:
         "accuracy_std": pd.Series(subset_accuracies).std(),
         "mean_score": pd.Series(subset_scores).mean(),
         "std_score": pd.Series(subset_scores).std(),
+        "mean_delta_filler": pd.Series(subset_delta_filler_accuracies).mean(),
+        "std_delta_filler": pd.Series(subset_delta_filler_accuracies).std(),
+        "mean_delta_no_filler": pd.Series(subset_delta_no_filler_accuracies).mean(),
+        "std_delta_no_filler": pd.Series(subset_delta_no_filler_accuracies).std(),
         "n_subsets": len(subset_accuracies),
         "n_items": len(subset_scores)
     })
