@@ -12,10 +12,10 @@ import glob
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
-    "--data_file",
+    "--data_dir",
     type=str,
     required=True,
-    help="Path to the WH embedded CSV file"
+    help="Directory containing subset CSV files"
 )
 
 parser.add_argument(
@@ -34,7 +34,9 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-data_file = args.data_file
+data_files = sorted(
+    glob.glob(os.path.join(args.data_dir, "*.csv"))
+)
 checkpoint_dir = args.checkpoint_dir
 output_file = args.output_file
 
@@ -47,7 +49,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # -------------------------
 # Load data
 # -------------------------
-df = pd.read_csv(data_file)
+# df = pd.read_csv(data_file)
 
 
 # -------------------------
@@ -156,7 +158,6 @@ def batch_token_surprisal(model, tokenizer, contexts, continuations, batch_size=
 # -------------------------
 results = []
 
-
 for ckpt in checkpoint_paths:
 
     print(f"\nEvaluating {ckpt}")
@@ -170,93 +171,95 @@ for ckpt in checkpoint_paths:
 
     model.eval()
 
-    scores = []
+    subset_accuracies = []
+    subset_scores = []
+
+    for data_file in data_files:
+
+        print(f"  Dataset: {os.path.basename(data_file)}")
+
+        df = pd.read_csv(data_file)
+
+        contexts = []
+        continuations = []
+        quad_ids = []
+
+        for qid, group in df.groupby("quadruplet_id"):
+
+            filler_context = group[group.filler == 1].iloc[0]["pre_gap_text"]
+            no_filler_context = group[group.filler == 0].iloc[0]["pre_gap_text"]
+
+            filler_gap = group[(group.filler == 1) & (group.gap == 1)].iloc[0]["post_gap_text"]
+            filler_no_gap = group[(group.filler == 1) & (group.gap == 0)].iloc[0]["post_gap_text"]
+
+            no_filler_gap = group[(group.filler == 0) & (group.gap == 1)].iloc[0]["post_gap_text"]
+            no_filler_no_gap = group[(group.filler == 0) & (group.gap == 0)].iloc[0]["post_gap_text"]
+
+            contexts.extend([
+                filler_context,
+                filler_context,
+                no_filler_context,
+                no_filler_context,
+            ])
+
+            continuations.extend([
+                filler_gap,
+                filler_no_gap,
+                no_filler_gap,
+                no_filler_no_gap,
+            ])
+
+            quad_ids.append(qid)
 
 
-    contexts = []
-    continuations = []
-    quad_ids = []
-
-    for qid, group in df.groupby("quadruplet_id"):
-
-        filler_context = group[group.filler == 1].iloc[0]["pre_gap_text"]
-        no_filler_context = group[group.filler == 0].iloc[0]["pre_gap_text"]
-
-        filler_gap = group[(group.filler == 1) & (group.gap == 1)].iloc[0]["post_gap_text"]
-        filler_no_gap = group[(group.filler == 1) & (group.gap == 0)].iloc[0]["post_gap_text"]
-
-        no_filler_gap = group[(group.filler == 0) & (group.gap == 1)].iloc[0]["post_gap_text"]
-        no_filler_no_gap = group[(group.filler == 0) & (group.gap == 0)].iloc[0]["post_gap_text"]
-
-        contexts.extend([
-            filler_context,
-            filler_context,
-            no_filler_context,
-            no_filler_context,
-        ])
-
-        continuations.extend([
-            filler_gap,
-            filler_no_gap,
-            no_filler_gap,
-            no_filler_no_gap,
-        ])
-
-        quad_ids.append(qid)
-
-
-    surprisals = batch_token_surprisal(
-        model,
-        tokenizer,
-        contexts,
-        continuations,
-        batch_size=128
-    )
-
-
-    scores = []
-
-    for i, qid in enumerate(quad_ids):
-
-        S_filler_gap = surprisals[4*i]
-        S_filler_no_gap = surprisals[4*i+1]
-        S_no_filler_gap = surprisals[4*i+2]
-        S_no_filler_no_gap = surprisals[4*i+3]
-
-        score = (
-            (S_filler_no_gap - S_filler_gap)
-            -
-            (S_no_filler_no_gap - S_no_filler_gap)
+        surprisals = batch_token_surprisal(
+            model,
+            tokenizer,
+            contexts,
+            continuations,
+            batch_size=128
         )
 
-        scores.append(score)
-    print("accuracy: ", (pd.Series(scores) > 0).mean())
 
-    scores = pd.Series(scores)
+        scores = []
 
+        for i in range(len(quad_ids)):
+
+            S_filler_gap = surprisals[4*i]
+            S_filler_no_gap = surprisals[4*i+1]
+            S_no_filler_gap = surprisals[4*i+2]
+            S_no_filler_no_gap = surprisals[4*i+3]
+
+            score = (
+                (S_filler_no_gap - S_filler_gap)
+                -
+                (S_no_filler_no_gap - S_no_filler_gap)
+            )
+
+            scores.append(score)
+
+
+        scores = pd.Series(scores)
+
+        subset_acc = (scores > 0).mean()
+
+        subset_accuracies.append(subset_acc)
+        subset_scores.extend(scores.tolist())
+
+        print(f"    accuracy={subset_acc:.4f}")
+
+
+    # aggregate across the 4 datasets
     results.append({
         "checkpoint": os.path.basename(ckpt),
-        "accuracy": (scores > 0).mean(),
-        "mean_score": scores.mean(),
-        "std_score": scores.std(),
-        "n_items": len(scores)
+        "accuracy_mean": sum(subset_accuracies) / len(subset_accuracies),
+        "accuracy_std": pd.Series(subset_accuracies).std(),
+        "mean_score": pd.Series(subset_scores).mean(),
+        "std_score": pd.Series(subset_scores).std(),
+        "n_subsets": len(subset_accuracies),
+        "n_items": len(subset_scores)
     })
 
 
     del model
     torch.cuda.empty_cache()
-
-
-# -------------------------
-# Save results
-# -------------------------
-results_df = pd.DataFrame(results)
-
-print(results_df)
-
-results_df.to_csv(
-    output_file,
-    index=False
-)
-
-print(f"\nSaved to {output_file}")
