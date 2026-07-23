@@ -230,6 +230,7 @@ for ckpt in checkpoint_paths:
         f_no_g = []
         no_f_g = []
         no_f_no_g = []
+
         for i in range(len(quad_ids)):
 
             S_filler_gap = surprisals[4*i]
@@ -237,13 +238,12 @@ for ckpt in checkpoint_paths:
             S_no_filler_gap = surprisals[4*i+2]
             S_no_filler_no_gap = surprisals[4*i+3]
 
-            score = (
+            scores.append(
                 (S_filler_no_gap - S_filler_gap)
                 -
                 (S_no_filler_no_gap - S_no_filler_gap)
             )
 
-            scores.append(score)
             fg.append(S_filler_gap)
             f_no_g.append(S_filler_no_gap)
             no_f_g.append(S_no_filler_gap)
@@ -251,47 +251,28 @@ for ckpt in checkpoint_paths:
 
 
         scores = pd.Series(scores)
-        fg = pd.Series(fg)
-        f_no_g = pd.Series(f_no_g)
-        no_f_g = pd.Series(no_f_g)
-        no_f_no_g = pd.Series(no_f_no_g)
-        subset_acc = (scores > 0).mean()
-        subset_fg_acc = (fg).mean()
-        subset_fg_accuracies.append(subset_fg_acc)
-        subset_f_no_g_acc = (f_no_g).mean()
-        subset_f_no_g_accuracies.append(subset_f_no_g_acc)
-        subset_no_f_g_acc = (no_f_g).mean()
-        subset_no_f_g_accuracies.append(subset_no_f_g_acc)
-        subset_no_f_no_g_acc = (no_f_no_g).mean()
-        subset_no_f_no_g_accuracies.append(subset_no_f_no_g_acc)
-        subset_accuracies.append(subset_acc)
-        subset_scores.extend(scores.tolist())
-
-        print(f"    accuracy={subset_acc:.4f}")
 
 
-    # aggregate across the 4 datasets
-    results.append({
-        "checkpoint": os.path.basename(ckpt),
-        "accuracy_mean": sum(subset_accuracies) / len(subset_accuracies),
-        "accuracy_std": pd.Series(subset_accuracies).std(),
-        "mean_score": pd.Series(subset_scores).mean(),
-        "std_score": pd.Series(subset_scores).std(),
-        "mean_fg": pd.Series(subset_fg_accuracies).mean(),
-        "std_fg": pd.Series(subset_fg_accuracies).std(),
-        "mean_f_no_g": pd.Series(subset_f_no_g_accuracies).mean(),
-        "std_f_no_g": pd.Series(subset_f_no_g_accuracies).std(),
-        "mean_no_f_g": pd.Series(subset_no_f_g_accuracies).mean(),
-        "std_no_f_g": pd.Series(subset_no_f_g_accuracies).std(),
-        "mean_no_f_no_g": pd.Series(subset_no_f_no_g_accuracies).mean(),
-        "std_no_f_no_g": pd.Series(subset_no_f_no_g_accuracies).std(),
-        "n_subsets": len(subset_accuracies),
-        "n_items": len(subset_scores)
-    })
+        results.append({
+            "checkpoint": os.path.basename(ckpt),
+            "dataset": os.path.basename(data_file),
 
+            "accuracy": (scores > 0).mean(),
+            "mean_score": scores.mean(),
+            "std_score": scores.std(),
 
-    del model
-    torch.cuda.empty_cache()
+            "mean_fg": pd.Series(fg).mean(),
+            "mean_f_no_g": pd.Series(f_no_g).mean(),
+            "mean_no_f_g": pd.Series(no_f_g).mean(),
+            "mean_no_f_no_g": pd.Series(no_f_no_g).mean(),
+
+            "n_items": len(scores)
+        })
+
+        print(
+            f"    {os.path.basename(data_file)} "
+            f"accuracy={results[-1]['accuracy']:.4f}"
+        )
 
 results_df = pd.DataFrame(results)
 
