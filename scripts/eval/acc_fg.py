@@ -53,44 +53,104 @@ df = pd.read_csv(data_file)
 # -------------------------
 # Surprisal function
 # -------------------------
-def token_surprisal(model, tokenizer, context, continuation):
+def batch_token_surprisal(model, tokenizer, contexts, continuations, batch_size=64):
+    """
+    contexts: list of strings
+    continuations: list of one-token continuations (with or without leading space)
 
-    context = context.rstrip()
-    continuation = " " + continuation.strip()
+    Returns: list of surprisal values in bits
+    """
 
-    context_ids = tokenizer(
-        context,
-        add_special_tokens=False
-    ).input_ids
+    surprisals = []
 
-    full_ids = tokenizer(
-        context + continuation,
-        add_special_tokens=False
-    ).input_ids
+    # prepare all token ids
+    all_context_ids = []
+    all_target_ids = []
 
-    assert len(full_ids) == len(context_ids) + 1, (
-        f"{repr(continuation)} is not one token: "
-        f"{tokenizer.tokenize(continuation)}"
-    )
+    for context, continuation in zip(contexts, continuations):
 
-    target_id = full_ids[-1]
+        context = context.rstrip()
+        continuation = " " + continuation.strip()
 
-    inputs = torch.tensor(
-        [context_ids],
-        device=model.device
-    )
+        context_ids = tokenizer(
+            context,
+            add_special_tokens=False
+        ).input_ids
 
-    with torch.no_grad():
-        logits = model(inputs).logits
+        full_ids = tokenizer(
+            context + continuation,
+            add_special_tokens=False
+        ).input_ids
 
-    log_probs = torch.log_softmax(logits[:, -1, :], dim=-1)
+        assert len(full_ids) == len(context_ids) + 1, (
+            f"{repr(continuation)} is not one token: "
+            f"{tokenizer.tokenize(continuation)}"
+        )
 
-    return (
-        -log_probs[0, target_id].item()
-        / torch.log(torch.tensor(2.)).item()
-    )
+        all_context_ids.append(context_ids)
+        all_target_ids.append(full_ids[-1])
 
 
+    # batch by padding
+    for start in range(0, len(all_context_ids), batch_size):
+
+        batch_contexts = all_context_ids[start:start+batch_size]
+        batch_targets = all_target_ids[start:start+batch_size]
+
+        max_len = max(len(x) for x in batch_contexts)
+
+        input_ids = []
+        attention_mask = []
+
+        for ids in batch_contexts:
+            pad_len = max_len - len(ids)
+            input_ids.append(ids + [tokenizer.eos_token_id] * pad_len)
+            attention_mask.append([1] * len(ids) + [0] * pad_len)
+
+        input_ids = torch.tensor(
+            input_ids,
+            device=model.device
+        )
+
+        attention_mask = torch.tensor(
+            attention_mask,
+            device=model.device
+        )
+
+
+        with torch.no_grad():
+            logits = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            ).logits
+
+
+        # position of last real token for each sequence
+        last_positions = attention_mask.sum(dim=1) - 1
+
+        next_logits = logits[
+            torch.arange(len(batch_targets), device=model.device),
+            last_positions
+        ]
+
+        log_probs = torch.log_softmax(
+            next_logits,
+            dim=-1
+        )
+
+        batch_surprisal = (
+            -log_probs[
+                torch.arange(len(batch_targets), device=model.device),
+                torch.tensor(batch_targets, device=model.device)
+            ]
+            / torch.log(torch.tensor(2., device=model.device))
+        )
+
+        surprisals.extend(
+            batch_surprisal.cpu().tolist()
+        )
+
+    return surprisals
 # -------------------------
 # Evaluate checkpoints
 # -------------------------
@@ -113,67 +173,56 @@ for ckpt in checkpoint_paths:
     scores = []
 
 
-    for qid, group in tqdm(
-        df.groupby("quadruplet_id"),
-        desc=os.path.basename(ckpt)
-    ):
+    contexts = []
+    continuations = []
+    quad_ids = []
 
-        filler_context = group[
-            group.filler == 1
-        ].iloc[0]["pre_gap_text"]
+    for qid, group in df.groupby("quadruplet_id"):
 
-        no_filler_context = group[
-            group.filler == 0
-        ].iloc[0]["pre_gap_text"]
+        filler_context = group[group.filler == 1].iloc[0]["pre_gap_text"]
+        no_filler_context = group[group.filler == 0].iloc[0]["pre_gap_text"]
 
+        filler_gap = group[(group.filler == 1) & (group.gap == 1)].iloc[0]["post_gap_text"]
+        filler_no_gap = group[(group.filler == 1) & (group.gap == 0)].iloc[0]["post_gap_text"]
 
-        filler_gap = group[
-            (group.filler == 1) &
-            (group.gap == 1)
-        ].iloc[0]["post_gap_text"]
+        no_filler_gap = group[(group.filler == 0) & (group.gap == 1)].iloc[0]["post_gap_text"]
+        no_filler_no_gap = group[(group.filler == 0) & (group.gap == 0)].iloc[0]["post_gap_text"]
 
-        filler_no_gap = group[
-            (group.filler == 1) &
-            (group.gap == 0)
-        ].iloc[0]["post_gap_text"]
-
-        no_filler_gap = group[
-            (group.filler == 0) &
-            (group.gap == 1)
-        ].iloc[0]["post_gap_text"]
-
-        no_filler_no_gap = group[
-            (group.filler == 0) &
-            (group.gap == 0)
-        ].iloc[0]["post_gap_text"]
-
-
-        S_filler_gap = token_surprisal(
-            model, tokenizer,
+        contexts.extend([
             filler_context,
-            filler_gap
-        )
-
-        S_filler_no_gap = token_surprisal(
-            model, tokenizer,
             filler_context,
-            filler_no_gap
-        )
-
-        S_no_filler_gap = token_surprisal(
-            model, tokenizer,
             no_filler_context,
-            no_filler_gap
-        )
-
-        S_no_filler_no_gap = token_surprisal(
-            model, tokenizer,
             no_filler_context,
-            no_filler_no_gap
-        )
+        ])
+
+        continuations.extend([
+            filler_gap,
+            filler_no_gap,
+            no_filler_gap,
+            no_filler_no_gap,
+        ])
+
+        quad_ids.append(qid)
 
 
-        # Positive = model prefers gap after filler
+    surprisals = batch_token_surprisal(
+        model,
+        tokenizer,
+        contexts,
+        continuations,
+        batch_size=128
+    )
+
+
+    scores = []
+
+    for i, qid in enumerate(quad_ids):
+
+        S_filler_gap = surprisals[4*i]
+        S_filler_no_gap = surprisals[4*i+1]
+        S_no_filler_gap = surprisals[4*i+2]
+        S_no_filler_no_gap = surprisals[4*i+3]
+
         score = (
             (S_filler_no_gap - S_filler_gap)
             -
