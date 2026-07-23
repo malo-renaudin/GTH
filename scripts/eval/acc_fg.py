@@ -54,37 +54,42 @@ df = pd.read_csv(data_file)
 # Surprisal function
 # -------------------------
 def token_surprisal(model, tokenizer, context, continuation):
-    """
-    continuation must be one GPT-2 token including leading space
-    """
 
-    token_ids = tokenizer(
-        continuation,
+    full = context + continuation
+
+    context_ids = tokenizer(
+        context,
         add_special_tokens=False
     ).input_ids
 
-    assert len(token_ids) == 1, (
-        f"{continuation} is not a single token: "
+    full_ids = tokenizer(
+        full,
+        add_special_tokens=False
+    ).input_ids
+
+    # the continuation should add exactly one token
+    assert len(full_ids) == len(context_ids) + 1, (
+        f"{repr(continuation)} is not one token: "
         f"{tokenizer.tokenize(continuation)}"
     )
 
-    inputs = tokenizer(
-        context,
-        return_tensors="pt"
-    ).to(model.device)
+    target_id = full_ids[-1]
+
+    inputs = torch.tensor(
+        [context_ids],
+        device=model.device
+    )
 
     with torch.no_grad():
-        logits = model(**inputs).logits
-
-    next_token_logits = logits[:, -1, :]
+        logits = model(inputs).logits
 
     log_probs = torch.log_softmax(
-        next_token_logits,
+        logits[:, -1, :],
         dim=-1
     )
 
     surprisal = (
-        -log_probs[0, token_ids[0]].item()
+        -log_probs[0, target_id].item()
         / torch.log(torch.tensor(2.)).item()
     )
 
