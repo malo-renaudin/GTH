@@ -55,7 +55,8 @@ df = pd.read_csv(data_file)
 # -------------------------
 def token_surprisal(model, tokenizer, context, continuation):
 
-    full = context + continuation
+    context = context.rstrip()
+    continuation = " " + continuation.strip()
 
     context_ids = tokenizer(
         context,
@@ -63,11 +64,10 @@ def token_surprisal(model, tokenizer, context, continuation):
     ).input_ids
 
     full_ids = tokenizer(
-        full,
+        context + continuation,
         add_special_tokens=False
     ).input_ids
 
-    # the continuation should add exactly one token
     assert len(full_ids) == len(context_ids) + 1, (
         f"{repr(continuation)} is not one token: "
         f"{tokenizer.tokenize(continuation)}"
@@ -83,17 +83,12 @@ def token_surprisal(model, tokenizer, context, continuation):
     with torch.no_grad():
         logits = model(inputs).logits
 
-    log_probs = torch.log_softmax(
-        logits[:, -1, :],
-        dim=-1
-    )
+    log_probs = torch.log_softmax(logits[:, -1, :], dim=-1)
 
-    surprisal = (
+    return (
         -log_probs[0, target_id].item()
         / torch.log(torch.tensor(2.)).item()
     )
-
-    return surprisal
 
 
 # -------------------------
