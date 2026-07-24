@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=1:00:00
-#SBATCH --array=0-4
+#SBATCH --array=0-1
 #SBATCH --error=results/logs/error_eval_fg_%A_%a.log
 #SBATCH --output=results/logs/output_eval_fg_%A_%a.log
 
@@ -19,9 +19,9 @@ conda activate litgpt_jz
 
 
 TASKS=(
-    "orc"
+    # "orc"
     "wh"
-    "orc_tokens"
+    # "orc_tokens"
     "wh_tokens"
 )
 
@@ -32,32 +32,32 @@ echo "Running task: $TASK"
 
 case $TASK in
 
-orc)
-    python scripts/eval/acc_fg.py \
-        --data_dir eval_data/relativizers2 \
-        --checkpoint_dir babylm-baseline-100m-gpt2 \
-        --output_file results/accuracy_fg_final/orc.csv
-    ;;
+# orc)
+#     python scripts/eval/acc_fg.py \
+#         --data_dir eval_data/relativizers2 \
+#         --checkpoint_dir babylm-baseline-100m-gpt2 \
+#         --output_file results/accuracy_fg_final/orc.csv
+#     ;;
 
 wh)
     python scripts/eval/acc_fg.py \
-        --data_dir eval_data/wh_fillers2 \
+        --data_dir eval_data/wh_fillers3 \
         --checkpoint_dir babylm-baseline-100m-gpt2 \
-        --output_file results/accuracy_fg_final/wh.csv
+        --output_file results/accuracy_fg_final/wh_good_vocab.csv
     ;;
 
-orc_tokens)
-    python scripts/eval/acc_fg_all_tokens.py \
-        --data_dir eval_data/relativizers2 \
-        --checkpoint_dir babylm-baseline-100m-gpt2 \
-        --output_file results/accuracy_fg_final/orc_tokens.csv
-    ;;
+# orc_tokens)
+#     python scripts/eval/acc_fg_all_tokens.py \
+#         --data_dir eval_data/relativizers2 \
+#         --checkpoint_dir babylm-baseline-100m-gpt2 \
+#         --output_file results/accuracy_fg_final/orc_tokens.csv
+#     ;;
 
 wh_tokens)
     python scripts/eval/acc_fg_all_tokens.py \
-        --data_dir eval_data/wh_fillers2 \
+        --data_dir eval_data/wh_fillers3 \
         --checkpoint_dir babylm-baseline-100m-gpt2 \
-        --output_file results/accuracy_fg_final/wh_tokens.csv
+        --output_file results/accuracy_fg_final/wh_good_vocab.csv
     ;;
 
 *)
