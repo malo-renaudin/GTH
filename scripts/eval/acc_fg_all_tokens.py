@@ -93,7 +93,7 @@ def batch_sequence_surprisal(model, tokenizer, sentences, batch_size=64):
                 attention_mask=attention_mask
             ).logits
 
-        log_probs = torch.log_softmax(logits, dim=-1)
+        log_probs = torch.log_softmax(logits.float(), dim=-1)
 
         for i, ids in enumerate(batch):
 
@@ -109,7 +109,9 @@ def batch_sequence_surprisal(model, tokenizer, sentences, batch_size=64):
                 / torch.log(torch.tensor(2., device=model.device))
             )
 
-            all_surprisals.append(surprisal.cpu().numpy())
+            all_surprisals.append(
+                surprisal.detach().cpu().numpy().astype(np.float32)
+            )
 
     return all_surprisals, encoded
 # -------------------------
