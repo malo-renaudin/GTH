@@ -9,7 +9,6 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
 #SBATCH --time=1:00:00
-#SBATCH --array=0-8
 #SBATCH --error=results/logs/error_eval__nested_%A_%a.log
 #SBATCH --output=results/logs/output_eval__nested_%A_%a.log
 
