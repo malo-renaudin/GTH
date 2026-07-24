@@ -13,6 +13,8 @@
 #SBATCH --error=results/logs/error_eval__nested_%A_%a.log
 #SBATCH --output=results/logs/output_eval__nested_%A_%a.log
 
+source $WORK/miniconda3/etc/profile.d/conda.sh
+conda activate litgpt_jz
 
 for ckpt in babylm-baseline-100m-gpt2/chck_*; do
     echo "Running $ckpt"
